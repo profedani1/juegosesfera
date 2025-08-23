@@ -1,4 +1,8 @@
+
+// game.txt - lógica del juego (usa la API expuesta)
 (function(){
+  console.log("Game module listo");
+  (function(){
   // Config y datos (puedes ampliarlos)
   const data = [
     {
@@ -287,5 +291,8 @@
   }).catch(err=>{
     console.warn("[game.txt] No se pudo conectar a la API de la ciudad:", err);
   });
+
+})();
+
 
 })();
