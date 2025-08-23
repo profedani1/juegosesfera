@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>Ciudad Procedural - Juego Integrado</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  body { margin: 0; overflow: hidden; background: #87CEEB; touch-action: none; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #ui {
+    position: fixed;
+    left: 10px;
+    top: 10px;
+    padding: 8px;
+    background: rgba(255,255,255,.85);
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: bold;
+    font-family: system-ui, sans-serif;
+    z-index: 10;
+  }
+  #crosshair {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    width: 12px;
+    height: 12px;
+    margin-left: -6px;
+    margin-top: -6px;
+    pointer-events: none;
+    z-index: 9;
+  }
+  #crosshair:before, #crosshair:after{
+    content:'';
+    position:absolute;
+    left:50%;
+    top:50%;
+    width:1px;
+    height:12px;
+    background:rgba(0,0,0,.6);
+    transform:translateX(-50%) translateY(-50%);
+  }
+  #crosshair:after{
+    width:12px;
+    height:1px;
+    transform:translateX(-50%) translateY(-50%);
+  }
+</style>
+</head>
+<body>
+<div id="ui"></div>
+<div id="crosshair" aria-hidden="true"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
+<script src="game.js"></script>
+<script>
+window.addEventListener("load", ()=>{
+
+// ------------------- CONFIGURACIÓN DE LA CIUDAD -------------------
+
+const CITY_BLOCK_SIZE = 7.5;
+const BLOCKS_RANGE = 15;
+const GRID_SIZE = BLOCKS_RANGE*2 + 1;
+const STREET_EVERY = 5;
+const SIDEWALK_HEIGHT = 0.2;
+const BUILDING_PADDING = 0.6;
+const MAX_JUMP_DISTANCE = 100;
+const JUMP_DURATION = 0.6;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 900);
+camera.position.set(0,2,0);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+window.addEventListener('resize', ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+const addLight=(Type,intensity,pos,shadow=false)=>{
+  const l=new Type(0xffffff,intensity);
+  l.position.set(...pos);
+  if(shadow){ l.castShadow=true; Object.assign(l.shadow.mapSize,{width:2048,height:2048}); }
+  scene.add(l);
+};
+addLight(THREE.DirectionalLight, 1.1, [50,100,50], true);
+addLight(THREE.DirectionalLight, 0.35, [-50,40,-60]);
+scene.add(new THREE.AmbientLight(0x666666));
+
+const mats = {
+  road: new THREE.MeshStandardMaterial({color: 0x9b9b9b}),
+  sidewalk: new THREE.MeshStandardMaterial({color: 0xbdbdbd}),
+  border: new THREE.MeshStandardMaterial({color: 0x000000}),
+};
+const buildingColors = [0x8B8B7A,0xA0522D,0xC0C0C0,0x708090,0xB0C4DE,0xD2B48C];
+const buildingMats = buildingColors.map(col => new THREE.MeshStandardMaterial({ color: col, roughness: .6, metalness: .05 }));
+
+const piDigits = ("14159265358979323846264338327950288419716939937510"+
+"58209749445923078164062862089986280348253421170679"+
+"82148086513282306647093844609550582231725359408128"+
+"48111745028410270193852110555964462294895493038196").split('');
+const getPiRandom = (ix, iz) => parseInt(piDigits[Math.abs((ix*374761393) ^ (iz*668265263)) % piDigits.length]) || 1;
+
+const mod = (n, m) => ((n % m) + m) % m;
+const isStreetAt = (bx, bz) => (mod(bx, STREET_EVERY) === 0) || (mod(bz, STREET_EVERY) === 0);
+
+const buildingGroup = new THREE.Group();
+scene.add(buildingGroup);
+const unitBoxGeom = new THREE.BoxGeometry(1,1,1);
+
+const grid = [];
+for(let i=0;i<GRID_SIZE;i++){
+  grid[i] = [];
+  for(let j=0;j<GRID_SIZE;j++){
+    const sidewalk = new THREE.Mesh(unitBoxGeom, mats.sidewalk);
+    sidewalk.receiveShadow = true;
+    sidewalk.scale.set(CITY_BLOCK_SIZE, SIDEWALK_HEIGHT, CITY_BLOCK_SIZE);
+    buildingGroup.add(sidewalk);
+
+    const building = new THREE.Mesh(unitBoxGeom, buildingMats[0]);
+    building.castShadow = building.receiveShadow = true;
+    building.visible = false;
+    buildingGroup.add(building);
+
+    grid[i][j] = { sidewalk, building };
+  }
+}
+
+let baseX = Math.floor(-BLOCKS_RANGE);
+let baseZ = Math.floor(-BLOCKS_RANGE);
+let offsetX = 0, offsetZ = 0;
+let pitch = 0, yaw = 0;
+
+const updateCell = (cell, worldBlockX, worldBlockZ) => {
+  const worldX = worldBlockX * CITY_BLOCK_SIZE;
+  const worldZ = worldBlockZ * CITY_BLOCK_SIZE;
+  const currentIsStreet = isStreetAt(worldBlockX, worldBlockZ);
+
+  const sidewalk = cell.sidewalk;
+  sidewalk.position.set(worldX + CITY_BLOCK_SIZE/2, SIDEWALK_HEIGHT/2, worldZ + CITY_BLOCK_SIZE/2);
+  sidewalk.material = currentIsStreet ? mats.road : mats.sidewalk;
+
+  if(currentIsStreet){
+    cell.building.visible = false;
+    cell.building.userData = {};
+    return;
+  }
+
+  const seed = getPiRandom(worldBlockX, worldBlockZ);
+  const h = (seed * 2) + 5;
+  const buildingSize = Math.max(1, CITY_BLOCK_SIZE - (BUILDING_PADDING * 2));
+
+  const b = cell.building;
+  b.visible = true;
+  b.scale.set(buildingSize, h, buildingSize);
+  b.position.set(worldX + CITY_BLOCK_SIZE/2, (h/2) + SIDEWALK_HEIGHT, worldZ + CITY_BLOCK_SIZE/2);
+  b.material = buildingMats[seed % buildingMats.length];
+
+  b.userData = { worldPos: b.position.clone(), topY: b.position.y + (h/2) };
+};
+
+const initGridFull = (bx, bz) => {
+  for(let i=0;i<GRID_SIZE;i++){
+    for(let j=0;j<GRID_SIZE;j++){
+      updateCell(grid[i][j], bx + i, bz + j);
+    }
+  }
+};
+initGridFull(baseX, baseZ);
+
+const shiftX = (steps) => {
+  if(steps > 0){
+    for(let s=0;s<steps;s++){
+      const removedCol = grid.shift();
+      const newWorldX = baseX + GRID_SIZE;
+      for(let j=0;j<GRID_SIZE;j++) updateCell(removedCol[j], newWorldX, baseZ + j);
+      grid.push(removedCol);
+      baseX += 1;
+    }
+  } else {
+    for(let s=0;s<Math.abs(steps);s++){
+      const removedCol = grid.pop();
+      const newWorldX = baseX - 1;
+      for(let j=0;j<GRID_SIZE;j++) updateCell(removedCol[j], newWorldX, baseZ + j);
+      grid.unshift(removedCol);
+      baseX -= 1;
+    }
+  }
+};
+
+const shiftZ = (steps) => {
+  if(steps > 0){
+    for(let s=0;s<steps;s++){
+      const newWorldZ = baseZ + GRID_SIZE;
+      for(let i=0;i<GRID_SIZE;i++){
+        const col = grid[i];
+        const removedCell = col.shift();
+        updateCell(removedCell, baseX + i, newWorldZ);
+        col.push(removedCell);
+      }
+      baseZ += 1;
+    }
+  } else {
+    for(let s=0;s<Math.abs(steps);s++){
+      const newWorldZ = baseZ - 1;
+      for(let i=0;i<GRID_SIZE;i++){
+        const col = grid[i];
+        const removedCell = col.pop();
+        updateCell(removedCell, baseX + i, newWorldZ);
+        col.unshift(removedCell);
+      }
+      baseZ -= 1;
+    }
+  }
+};
+
+const recomputeBase = ()=> {
+  const newBaseX = Math.floor(offsetX / CITY_BLOCK_SIZE) - BLOCKS_RANGE;
+  const newBaseZ = Math.floor(offsetZ / CITY_BLOCK_SIZE) - BLOCKS_RANGE;
+  const dx = newBaseX - baseX;
+  const dz = newBaseZ - baseZ;
+  if(dx !== 0) shiftX(dx);
+  if(dz !== 0) shiftZ(dz);
+};
+
+// --- Control del jugador ---
+const cameraEyeHeight = 2.0; 
+const playerPos = new THREE.Vector3(0, cameraEyeHeight, 0);
+
+(function placePlayerOnCenter(){
+  const mid = Math.floor(GRID_SIZE/2);
+  const centerCell = grid[mid][mid];
+  playerPos.set(centerCell.building.position.x, centerCell.building.userData.topY + cameraEyeHeight, centerCell.building.position.z);
+})();
+
+let jumping=false, jumpStartTime=0, jumpFrom=new THREE.Vector3(), jumpTo=new THREE.Vector3(), jumpPeak=4;
+function startJump(targetVec){
+  if(jumping) return;
+  const dist = targetVec.clone().setY(0).distanceTo(playerPos.clone().setY(0));
+  if(dist > MAX_JUMP_DISTANCE) return;
+  jumping=true; jumpStartTime = performance.now()/1000;
+  jumpFrom.copy(playerPos);
+  jumpTo.copy(targetVec);
+  jumpPeak = Math.max(4, dist * 0.25 + 2);
+}
+
+// ------------------- INTEGRACIÓN DEL JUEGO -------------------
+initGame(scene, buildingGroup, document.getElementById('ui'));
+
+// ------------------- LOOP PRINCIPAL -------------------
+const clock = new THREE.Clock();
+(function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), .05);
+
+  offsetX = playerPos.x; offsetZ = playerPos.z;
+  recomputeBase();
+
+  if(jumping){
+    const t = (performance.now()/1000 - jumpStartTime) / JUMP_DURATION;
+    if(t>=1){ playerPos.copy(jumpTo); jumping=false; checkLanding(playerPos); }
+    else {
+      const curr = new THREE.Vector3().lerpVectors(jumpFrom, jumpTo, t);
+      const y = THREE.MathUtils.lerp(jumpFrom.y, jumpTo.y, t) + Math.sin(Math.min(1, t)*Math.PI) * jumpPeak;
+      playerPos.set(curr.x, y, curr.z);
+    }
+  }
+
+  const dir = new THREE.Vector3(Math.sin(yaw), Math.sin(pitch), Math.cos(yaw)).normalize();
+  camera.position.copy(playerPos);
+  camera.lookAt(playerPos.x + dir.x, playerPos.y + dir.y, playerPos.z + dir.z);
+
+  renderer.render(scene, camera);
+})();
+});
+</script>
+</body>
+</html>
