@@ -1,8 +1,337 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Vuelo sobre Ciudad Procedural (pantalla como joystick)</title>
+<style>
+body{margin:0;overflow:hidden;background:#87CEEB;font-family:system-ui,Segoe UI,Roboto,Arial;}
+canvas{display:block;width:100vw;height:100vh;}
+#ui {position:fixed;left:10px;top:10px;padding:8px;background:rgba(255,255,255,.85);border-radius:6px;font-size:13px;z-index:9999;}
+#ui small{display:block;color:#333;}
+</style>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
+<script>
+window.addEventListener("load",()=>{
+
+// --- Parámetros de ciudad ---
+const CITY_BLOCK_SIZE = 7.5;
+const BLOCKS_RANGE = 20;
+const GRID_SIZE = BLOCKS_RANGE*2 + 1; 
+const SIDEWALK_HEIGHT = 0.2;
+const BUILDING_PADDING = 0.6;
+
+// --- Movimiento ---
+const SPEED = 15;
+const PITCH_SENS = 1;
+const ROLL_SENS  = 2;
+const SMOOTH = 0.1;
+const MAX_HEIGHT = 120;
+const MIN_HEIGHT = 5;
+
+// --- Detección y ajustes para móvil/táctil ---
+const isMobile = /Android|iPhone|iPad|iPod|Mobi|Touch|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent) || ('ontouchstart' in window);
+const TOUCH_SENSITIVITY = isMobile ? 2.4 : 1.0; // multiplicador principal en móviles
+const VELOCITY_MULT = isMobile ? 0.0022 : 0.0;  // si el dedo va rápido, añadir boost (sólo móvil)
+const MAX_VELOCITY_BOOST = 0.7; // tope del boost por velocidad
+const YAW_MULT = isMobile ? 0.06 : 0.035; // mayor factor de giro para móvil
+
+// --- Escena ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, .1, 900);
+camera.position.set(0,25,50);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+window.addEventListener('resize', ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// --- Luz ---
+const addLight=(type,intensity,pos,shadow=false)=>{
+  const l=new type(0xffffff,intensity);
+  l.position.set(...pos);
+  if(shadow){
+    l.castShadow=true;
+    Object.assign(l.shadow.mapSize,{width:2048,height:2048});
+    Object.assign(l.shadow.camera,{near:1,far:500,left:-200,right:200,top:200,bottom:-200});
+  }
+  scene.add(l);
+};
+addLight(THREE.DirectionalLight,1.1,[50,100,50],true);
+addLight(THREE.DirectionalLight,.35,[-50,40,-60]);
+scene.add(new THREE.AmbientLight(0x666666));
+
+// --- Materiales ---
+const mats = {
+  road: new THREE.MeshStandardMaterial({color:0x9b9b9b}),
+  sidewalk: new THREE.MeshStandardMaterial({color:0xbdbdbd}),
+  border: new THREE.MeshStandardMaterial({color:0x000000}),
+};
+const buildingColors = [0x8B8B7A,0xA0522D,0xC0C0C0,0x708090,0xB0C4DE,0xD2B48C];
+const buildingMats = buildingColors.map(c => new THREE.MeshStandardMaterial({color:c, roughness:.6, metalness:.05}));
+
+// --- Pi random ---
+const piDigits = ("14159265358979323846264338327950288419716939937510"+
+"58209749445923078164062862089986280348253421170679"+
+"82148086513282306647093844609550582231725359408128"+
+"48111745028410270193852110555964462294895493038196").split('');
+const getPiRandom = (ix, iz) => parseInt(piDigits[Math.abs((ix*374761393) ^ (iz*668265263)) % piDigits.length]) || 1;
+
+// --- Construcción de cuadrícula ---
+const buildingGroup = new THREE.Group();
+scene.add(buildingGroup);
+const unitBoxGeom = new THREE.BoxGeometry(1,1,1);
+const borderThickness = 0.06;
+const grid = [];
+for(let i=0;i<GRID_SIZE;i++){
+  grid[i] = [];
+  for(let j=0;j<GRID_SIZE;j++){
+    const sidewalk = new THREE.Mesh(unitBoxGeom, mats.sidewalk);
+    sidewalk.receiveShadow = true;
+    sidewalk.scale.set(CITY_BLOCK_SIZE, SIDEWALK_HEIGHT, CITY_BLOCK_SIZE);
+    buildingGroup.add(sidewalk);
+
+    const borderN = new THREE.Mesh(unitBoxGeom, mats.border); borderN.visible=false; buildingGroup.add(borderN);
+    const borderE = new THREE.Mesh(unitBoxGeom, mats.border); borderE.visible=false; buildingGroup.add(borderE);
+    const borderS = new THREE.Mesh(unitBoxGeom, mats.border); borderS.visible=false; buildingGroup.add(borderS);
+    const borderW = new THREE.Mesh(unitBoxGeom, mats.border); borderW.visible=false; buildingGroup.add(borderW);
+
+    const building = new THREE.Mesh(unitBoxGeom, buildingMats[0]);
+    building.castShadow = building.receiveShadow = true;
+    building.visible = false;
+    buildingGroup.add(building);
+
+    const buildingEdges = new THREE.LineSegments(new THREE.EdgesGeometry(unitBoxGeom), new THREE.LineBasicMaterial({color:0x000}));
+    buildingEdges.visible=false; buildingGroup.add(buildingEdges);
+
+    const baseEdge = new THREE.LineSegments(new THREE.EdgesGeometry(unitBoxGeom), new THREE.LineBasicMaterial({color:0x000}));
+    baseEdge.visible=false; buildingGroup.add(baseEdge);
+
+    grid[i][j] = { sidewalk, borders:{N:borderN,E:borderE,S:borderS,W:borderW}, building, buildingEdges, baseEdge };
+  }
+}
+
+// --- Funciones ciudad ---
+const mod = (n,m)=>((n%m)+m)%m;
+const isStreetAt = (bx,bz)=> (mod(bx,5)===0) || (mod(bz,5)===0);
+
+const updateCell = (cell, worldBlockX, worldBlockZ)=>{
+  const worldX = worldBlockX * CITY_BLOCK_SIZE;
+  const worldZ = worldBlockZ * CITY_BLOCK_SIZE;
+  const isStreet = isStreetAt(worldBlockX, worldBlockZ);
+  const sidewalk = cell.sidewalk;
+  sidewalk.position.set(worldX + CITY_BLOCK_SIZE/2, SIDEWALK_HEIGHT/2, worldZ + CITY_BLOCK_SIZE/2);
+  sidewalk.scale.set(CITY_BLOCK_SIZE, SIDEWALK_HEIGHT, CITY_BLOCK_SIZE);
+  sidewalk.material = isStreet ? mats.road : mats.sidewalk;
+
+  const nS = isStreetAt(worldBlockX, worldBlockZ+1);
+  const sS = isStreetAt(worldBlockX, worldBlockZ-1);
+  const eS = isStreetAt(worldBlockX+1, worldBlockZ);
+  const wS = isStreetAt(worldBlockX-1, worldBlockZ);
+
+  const showN = (!isStreet && nS);
+  const showS = (!isStreet && sS);
+  const showE = (!isStreet && eS);
+  const showW = (!isStreet && wS);
+
+  const h = SIDEWALK_HEIGHT + 0.02;
+  const bn = cell.borders.N; bn.visible = !!showN;
+  if(bn.visible){ bn.scale.set(CITY_BLOCK_SIZE, h, borderThickness); bn.position.set(worldX + CITY_BLOCK_SIZE/2, SIDEWALK_HEIGHT/2 + h/2 - 0.01, worldZ + CITY_BLOCK_SIZE - borderThickness/2); }
+  const bs = cell.borders.S; bs.visible = !!showS;
+  if(bs.visible){ bs.scale.set(CITY_BLOCK_SIZE, h, borderThickness); bs.position.set(worldX + CITY_BLOCK_SIZE/2, SIDEWALK_HEIGHT/2 + h/2 - 0.01, worldZ + borderThickness/2); }
+  const be = cell.borders.E; be.visible = !!showE;
+  if(be.visible){ be.scale.set(borderThickness, h, CITY_BLOCK_SIZE); be.position.set(worldX + CITY_BLOCK_SIZE - borderThickness/2, SIDEWALK_HEIGHT/2 + h/2 - 0.01, worldZ + CITY_BLOCK_SIZE/2); }
+  const bw = cell.borders.W; bw.visible = !!showW;
+  if(bw.visible){ bw.scale.set(borderThickness, h, CITY_BLOCK_SIZE); bw.position.set(worldX + borderThickness/2, SIDEWALK_HEIGHT/2 + h/2 - 0.01, worldZ + CITY_BLOCK_SIZE/2); }
+
+  if(isStreet){
+    cell.building.visible=false;
+    cell.buildingEdges.visible=false;
+    cell.baseEdge.visible=false;
+    return;
+  }
+
+  const seed = getPiRandom(worldBlockX, worldBlockZ);
+  const bh = (seed*2)+5;
+  const bsize = Math.max(1, CITY_BLOCK_SIZE - (BUILDING_PADDING*2));
+
+  const b = cell.building;
+  b.visible=true;
+  b.scale.set(bsize, bh, bsize);
+  b.position.set(worldX + CITY_BLOCK_SIZE/2, (bh/2)+SIDEWALK_HEIGHT, worldZ + CITY_BLOCK_SIZE/2);
+  b.material = buildingMats[seed % buildingMats.length];
+
+  const bex = cell.buildingEdges;
+  bex.visible=true; bex.position.copy(b.position); bex.scale.copy(b.scale);
+
+  const baseEdge = cell.baseEdge;
+  baseEdge.visible=true;
+  baseEdge.position.set(worldX + CITY_BLOCK_SIZE/2, SIDEWALK_HEIGHT/2 + (Math.max(.2, SIDEWALK_HEIGHT+.05)/2), worldZ + CITY_BLOCK_SIZE/2);
+  baseEdge.scale.set(bsize+0.02, Math.max(.2, SIDEWALK_HEIGHT+.05), bsize+0.02);
+};
+
+let baseX = -BLOCKS_RANGE;
+let baseZ = -BLOCKS_RANGE;
+const initGridFull = ()=>{ for(let i=0;i<GRID_SIZE;i++) for(let j=0;j<GRID_SIZE;j++) updateCell(grid[i][j], baseX+i, baseZ+j); };
+initGridFull();
+
+// --- Variables vuelo ---
+let offsetX=0, offsetY=25, offsetZ=0;
+let pitch=0, roll=0, yaw=0;
+
+// --- Pantalla como joystick ---
+// mantenemos stickX/stickY [-1,1] pero aplicamos sensibilidad y boost en update
+let stickX=0, stickY=0, isActive=false;
+
+// variables para calcular velocidad del dedo (sólo usadas en táctil)
+let lastPtrX = 0, lastPtrY = 0, lastPtrTime = 0, lastPtrIsTouch = false;
+
+function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+
+function updateStickFromPointer(clientX, clientY, pointerType){
+  // Centro de la pantalla
+  const cx = window.innerWidth/2;
+  const cy = window.innerHeight/2;
+
+  // Normalización absoluta (mismo cálculo que antes)
+  let baseX = ((clientX - cx)/cx);
+  let baseY = ((cy - clientY)/cy);
+  // asegurar en rango [-1,1]
+  baseX = clamp(baseX, -1, 1);
+  baseY = clamp(baseY, -1, 1);
+
+  // Aplicar multiplicador táctil si es móvil
+  let appliedX = baseX;
+  let appliedY = baseY;
+
+  // Si es dispositivo móvil y la entrada es táctil, usamos boost por velocidad
+  const now = performance.now();
+  if(isMobile && pointerType === 'touch'){
+    if(lastPtrTime && lastPtrIsTouch){
+      const dt = Math.max(1, now - lastPtrTime); // ms
+      const speedX = (clientX - lastPtrX) / dt; // px per ms
+      const speedY = (clientY - lastPtrY) / dt;
+
+      // velocidad puede ser grande; la multiplicamos por VELOCITY_MULT para obtener boost en [-max,max]
+      let boostX = speedX * VELOCITY_MULT;
+      let boostY = -speedY * VELOCITY_MULT; // invertimos Y porque baseY usa (cy - clientY)
+
+      boostX = clamp(boostX, -MAX_VELOCITY_BOOST, MAX_VELOCITY_BOOST);
+      boostY = clamp(boostY, -MAX_VELOCITY_BOOST, MAX_VELOCITY_BOOST);
+
+      appliedX = clamp(appliedX + boostX, -1, 1);
+      appliedY = clamp(appliedY + boostY, -1, 1);
+    }
+    // aplicar sensibilidad táctil
+    appliedX = clamp(appliedX * TOUCH_SENSITIVITY, -1, 1);
+    appliedY = clamp(appliedY * TOUCH_SENSITIVITY, -1, 1);
+  } else {
+    // no táctil: en PC o si pointerType no es touch, dejamos comportamiento clásico (sin multiplicador)
+    appliedX = clamp(appliedX, -1, 1);
+    appliedY = clamp(appliedY, -1, 1);
+  }
+
+  // zona muerta pequeña para evitar jitter
+  if(Math.abs(appliedX) < 0.01) appliedX = 0;
+  if(Math.abs(appliedY) < 0.01) appliedY = 0;
+
+  // actualizar sticks globales
+  stickX = appliedX;
+  stickY = appliedY;
+
+  // almacenar últimos para cálculo de velocidad
+  lastPtrX = clientX;
+  lastPtrY = clientY;
+  lastPtrTime = now;
+  lastPtrIsTouch = (pointerType === 'touch');
+}
+
+// Escuchadores pointer (maneja mouse + touch + pen)
+window.addEventListener('pointerdown', e=>{
+  isActive=true;
+  // inicializamos lastPtr para evitar un salto de velocidad en el primer move
+  lastPtrX = e.clientX; lastPtrY = e.clientY; lastPtrTime = performance.now();
+  lastPtrIsTouch = (e.pointerType === 'touch');
+  updateStickFromPointer(e.clientX, e.clientY, e.pointerType);
+});
+window.addEventListener('pointermove', e=>{
+  if(isActive) updateStickFromPointer(e.clientX, e.clientY, e.pointerType);
+});
+window.addEventListener('pointerup', e=>{
+  isActive=false;
+  stickX=0; stickY=0;
+  // limpiar lastPtr
+  lastPtrTime = 0; lastPtrIsTouch = false;
+});
+
+// --- Animación ---
+let clock = new THREE.Clock();
+(function animate(){
+  requestAnimationFrame(animate);
+  const d = Math.min(clock.getDelta(),0.05);
+
+  // Pitch/Roll suavizado (aquí aplicamos TOUCH_SENSITIVITY a la entrada)
+  const targetPitch = stickY * PITCH_SENS; // stickY ya contiene sensibilidad táctil aplicada
+  const targetRoll = stickX * ROLL_SENS;   // stickX ya contiene sensibilidad táctil aplicada
+
+  pitch += (targetPitch - pitch) * SMOOTH;
+  roll  += (targetRoll  - roll)  * SMOOTH;
+  const maxPitch = Math.PI/2*0.8;
+  if(pitch>maxPitch) pitch=maxPitch;
+  if(pitch<-maxPitch) pitch=-maxPitch;
+
+  // Aplicamos factor de yaw mayor en móvil para incrementar giro lateral
+  yaw -= roll * YAW_MULT;
+
+  const dir = new THREE.Vector3(Math.sin(yaw)*Math.cos(pitch), Math.sin(pitch), Math.cos(yaw)*Math.cos(pitch)).normalize();
+  if(isActive){
+    offsetX += dir.x*SPEED*d;
+    offsetY += dir.y*SPEED*d;
+    offsetZ += dir.z*SPEED*d;
+  }
+  offsetY = Math.min(Math.max(MIN_HEIGHT,offsetY),MAX_HEIGHT);
+
+  // --- Recalcular ciudad alrededor ---
+  const newBaseX = Math.floor(offsetX/CITY_BLOCK_SIZE) - BLOCKS_RANGE;
+  const newBaseZ = Math.floor(offsetZ/CITY_BLOCK_SIZE) - BLOCKS_RANGE;
+  const dx = newBaseX - baseX;
+  const dz = newBaseZ - baseZ;
+
+  if(dx!==0){
+    if(dx>0){ for(let s=0;s<dx;s++){ const removedCol=grid.shift(); for(let j=0;j<GRID_SIZE;j++) updateCell(removedCol[j], baseX+GRID_SIZE, baseZ+j); grid.push(removedCol); baseX++; } }
+    else{ for(let s=0;s<-dx;s++){ const removedCol=grid.pop(); for(let j=0;j<GRID_SIZE;j++) updateCell(removedCol[j], baseX-1, baseZ+j); grid.unshift(removedCol); baseX--; } }
+  }
+
+  if(dz!==0){
+    if(dz>0){ for(let s=0;s<dz;s++){ for(let i=0;i<GRID_SIZE;i++){ const col=grid[i]; const removed=col.shift(); updateCell(removed, baseX+i, baseZ+GRID_SIZE); col.push(removed); } baseZ++; } }
+    else{ for(let s=0;s<-dz;s++){ for(let i=0;i<GRID_SIZE;i++){ const col=grid[i]; const removed=col.pop(); updateCell(removed, baseX+i, baseZ-1); col.unshift(removed); } baseZ--; } }
+  }
+
+  camera.position.set(offsetX,offsetY,offsetZ);
+  const lookTarget = new THREE.Vector3(offsetX+Math.sin(yaw)*Math.cos(pitch), offsetY+Math.sin(pitch), offsetZ+Math.cos(yaw)*Math.cos(pitch));
+  camera.lookAt(lookTarget);
+
+  const maxRollVisual = Math.PI/3;
+  const visualRoll = Math.max(-maxRollVisual, Math.min(maxRollVisual, roll));
+  const q = new THREE.Quaternion();
+  q.setFromAxisAngle(new THREE.Vector3(0,0,1), -visualRoll);
+  camera.quaternion.multiply(q);
+
+  renderer.render(scene,camera);
+})();
 <!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8" />
-<title>Ciudad Procedural - Juego Integrado</title>
+<title>Ciudad Procedural - Primera Persona (FPS rotation)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
   body { margin: 0; overflow: hidden; background: #87CEEB; touch-action: none; }
@@ -14,11 +343,12 @@
     padding: 8px;
     background: rgba(255,255,255,.85);
     border-radius: 6px;
-    font-size: 16px;
-    font-weight: bold;
+    font-size: 14px;
     font-family: system-ui, sans-serif;
     z-index: 10;
   }
+  #ui small { display:block; color:#333; }
+  
   #crosshair {
     position: fixed;
     left: 50%;
@@ -45,18 +375,21 @@
     height:1px;
     transform:translateX(-50%) translateY(-50%);
   }
+  
+  #touch-hint{ position: fixed; right: 10px; bottom: 10px; background: rgba(255,255,255,.85); padding:6px 8px; border-radius:6px; font-size:13px; z-index:10; display:none; }
+  @media (pointer:coarse){ #touch-hint{ display:block; } }
 </style>
 </head>
 <body>
-<div id="ui"></div>
+<div id="ui">
+
+</div>
 <div id="crosshair" aria-hidden="true"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
-<script src="game.js"></script>
-<script>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script><script>
 window.addEventListener("load", ()=>{
 
-// ------------------- CONFIGURACIÓN DE LA CIUDAD -------------------
 
 const CITY_BLOCK_SIZE = 7.5;
 const BLOCKS_RANGE = 15;
@@ -66,6 +399,7 @@ const SIDEWALK_HEIGHT = 0.2;
 const BUILDING_PADDING = 0.6;
 const MAX_JUMP_DISTANCE = 100;
 const JUMP_DURATION = 0.6;
+
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
@@ -85,6 +419,7 @@ window.addEventListener('resize', ()=>{
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+
 const addLight=(Type,intensity,pos,shadow=false)=>{
   const l=new Type(0xffffff,intensity);
   l.position.set(...pos);
@@ -103,14 +438,17 @@ const mats = {
 const buildingColors = [0x8B8B7A,0xA0522D,0xC0C0C0,0x708090,0xB0C4DE,0xD2B48C];
 const buildingMats = buildingColors.map(col => new THREE.MeshStandardMaterial({ color: col, roughness: .6, metalness: .05 }));
 
+
 const piDigits = ("14159265358979323846264338327950288419716939937510"+
 "58209749445923078164062862089986280348253421170679"+
 "82148086513282306647093844609550582231725359408128"+
 "48111745028410270193852110555964462294895493038196").split('');
 const getPiRandom = (ix, iz) => parseInt(piDigits[Math.abs((ix*374761393) ^ (iz*668265263)) % piDigits.length]) || 1;
 
+
 const mod = (n, m) => ((n % m) + m) % m;
 const isStreetAt = (bx, bz) => (mod(bx, STREET_EVERY) === 0) || (mod(bz, STREET_EVERY) === 0);
+
 
 const buildingGroup = new THREE.Group();
 scene.add(buildingGroup);
@@ -125,19 +463,71 @@ for(let i=0;i<GRID_SIZE;i++){
     sidewalk.scale.set(CITY_BLOCK_SIZE, SIDEWALK_HEIGHT, CITY_BLOCK_SIZE);
     buildingGroup.add(sidewalk);
 
+    const borderN = new THREE.Mesh(unitBoxGeom, mats.border); borderN.visible = false; buildingGroup.add(borderN);
+    const borderE = new THREE.Mesh(unitBoxGeom, mats.border); borderE.visible = false; buildingGroup.add(borderE);
+    const borderS = new THREE.Mesh(unitBoxGeom, mats.border); borderS.visible = false; buildingGroup.add(borderS);
+    const borderW = new THREE.Mesh(unitBoxGeom, mats.border); borderW.visible = false; buildingGroup.add(borderW);
+
     const building = new THREE.Mesh(unitBoxGeom, buildingMats[0]);
     building.castShadow = building.receiveShadow = true;
     building.visible = false;
     buildingGroup.add(building);
 
-    grid[i][j] = { sidewalk, building };
+    const buildingEdges = new THREE.LineSegments(new THREE.EdgesGeometry(unitBoxGeom), new THREE.LineBasicMaterial({color:0x000}));
+    buildingEdges.visible = false;
+    buildingGroup.add(buildingEdges);
+
+    const baseEdge = new THREE.LineSegments(new THREE.EdgesGeometry(unitBoxGeom), new THREE.LineBasicMaterial({color:0x000}));
+    baseEdge.visible = false;
+    buildingGroup.add(baseEdge);
+
+    grid[i][j] = {
+      sidewalk,
+      borders: { N: borderN, E: borderE, S: borderS, W: borderW },
+      building, buildingEdges, baseEdge
+    };
   }
 }
+
 
 let baseX = Math.floor(-BLOCKS_RANGE);
 let baseZ = Math.floor(-BLOCKS_RANGE);
 let offsetX = 0, offsetZ = 0;
 let pitch = 0, yaw = 0;
+
+const borderThickness = 0.06;
+const borderHeight = SIDEWALK_HEIGHT + 0.02;
+
+
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+const hoverMarker = new THREE.Mesh(
+  new THREE.RingGeometry(0, 0.05, 10),
+  new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0 
+  })
+);
+hoverMarker.rotation.x = -Math.PI/2;
+hoverMarker.visible=false;
+scene.add(hoverMarker);
+
+function updateHoverFromPoint(clientX, clientY, useCenter=false){
+  if(useCenter){
+    mouse.x = 0; mouse.y = 0;
+  } else {
+    mouse.x = (clientX / window.innerWidth) * 2 - 1;
+    mouse.y = - (clientY / window.innerHeight) * 2 + 1;
+  }
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects(buildingGroup.children, true);
+  let found=null;
+  for(let it of intersects){ if(it.object && it.object.userData && it.object.userData.worldPos && it.object.visible){ found=it.object; break; } }
+  if(found){ hoverMarker.position.set(found.userData.worldPos.x, found.userData.topY + 0.02, found.userData.worldPos.z); hoverMarker.scale.setScalar( Math.max(1, found.scale.x) ); hoverMarker.visible=true; } else { hoverMarker.visible=false; }
+}
+
 
 const updateCell = (cell, worldBlockX, worldBlockZ) => {
   const worldX = worldBlockX * CITY_BLOCK_SIZE;
@@ -146,10 +536,55 @@ const updateCell = (cell, worldBlockX, worldBlockZ) => {
 
   const sidewalk = cell.sidewalk;
   sidewalk.position.set(worldX + CITY_BLOCK_SIZE/2, SIDEWALK_HEIGHT/2, worldZ + CITY_BLOCK_SIZE/2);
+  sidewalk.scale.set(CITY_BLOCK_SIZE, SIDEWALK_HEIGHT, CITY_BLOCK_SIZE);
   sidewalk.material = currentIsStreet ? mats.road : mats.sidewalk;
+
+  const northIsStreet = isStreetAt(worldBlockX, worldBlockZ + 1);
+  const southIsStreet = isStreetAt(worldBlockX, worldBlockZ - 1);
+  const eastIsStreet  = isStreetAt(worldBlockX + 1, worldBlockZ);
+  const westIsStreet  = isStreetAt(worldBlockX - 1, worldBlockZ);
+
+  const showN = (!currentIsStreet && northIsStreet);
+  const showS = (!currentIsStreet && southIsStreet);
+  const showE = (!currentIsStreet && eastIsStreet);
+  const showW = (!currentIsStreet && westIsStreet);
+
+  const bn = cell.borders.N;
+  bn.visible = !!showN;
+  if(bn.visible){
+    bn.scale.set(CITY_BLOCK_SIZE, borderHeight, borderThickness);
+    const zpos = worldZ + CITY_BLOCK_SIZE - (borderThickness / 2);
+    bn.position.set(worldX + CITY_BLOCK_SIZE/2, SIDEWALK_HEIGHT/2 + (borderHeight/2) - 0.01, zpos);
+  }
+
+  const bs = cell.borders.S;
+  bs.visible = !!showS;
+  if(bs.visible){
+    bs.scale.set(CITY_BLOCK_SIZE, borderHeight, borderThickness);
+    const zpos = worldZ + (borderThickness / 2);
+    bs.position.set(worldX + CITY_BLOCK_SIZE/2, SIDEWALK_HEIGHT/2 + (borderHeight/2) - 0.01, zpos);
+  }
+
+  const be = cell.borders.E;
+  be.visible = !!showE;
+  if(be.visible){
+    be.scale.set(borderThickness, borderHeight, CITY_BLOCK_SIZE);
+    const xpos = worldX + CITY_BLOCK_SIZE - (borderThickness / 2);
+    be.position.set(xpos, SIDEWALK_HEIGHT/2 + (borderHeight/2) - 0.01, worldZ + CITY_BLOCK_SIZE/2);
+  }
+
+  const bw = cell.borders.W;
+  bw.visible = !!showW;
+  if(bw.visible){
+    bw.scale.set(borderThickness, borderHeight, CITY_BLOCK_SIZE);
+    const xpos = worldX + (borderThickness / 2);
+    bw.position.set(xpos, SIDEWALK_HEIGHT/2 + (borderHeight/2) - 0.01, worldZ + CITY_BLOCK_SIZE/2);
+  }
 
   if(currentIsStreet){
     cell.building.visible = false;
+    cell.buildingEdges.visible = false;
+    cell.baseEdge.visible = false;
     cell.building.userData = {};
     return;
   }
@@ -164,8 +599,21 @@ const updateCell = (cell, worldBlockX, worldBlockZ) => {
   b.position.set(worldX + CITY_BLOCK_SIZE/2, (h/2) + SIDEWALK_HEIGHT, worldZ + CITY_BLOCK_SIZE/2);
   b.material = buildingMats[seed % buildingMats.length];
 
-  b.userData = { worldPos: b.position.clone(), topY: b.position.y + (h/2) };
+  b.userData = b.userData || {};
+  b.userData.worldPos = b.position.clone();
+  b.userData.topY = b.position.y + (h/2);
+
+  const bex = cell.buildingEdges;
+  bex.visible = true;
+  bex.position.copy(b.position);
+  bex.scale.copy(b.scale);
+
+  const baseEdge = cell.baseEdge;
+  baseEdge.visible = true;
+  baseEdge.position.set(worldX + CITY_BLOCK_SIZE/2, SIDEWALK_HEIGHT/2 + (Math.max(.2, SIDEWALK_HEIGHT + .05)/2), worldZ + CITY_BLOCK_SIZE/2);
+  baseEdge.scale.set(buildingSize + 0.02, Math.max(.2, SIDEWALK_HEIGHT + .05), buildingSize + 0.02);
 };
+
 
 const initGridFull = (bx, bz) => {
   for(let i=0;i<GRID_SIZE;i++){
@@ -176,12 +624,16 @@ const initGridFull = (bx, bz) => {
 };
 initGridFull(baseX, baseZ);
 
+
 const shiftX = (steps) => {
+  if(steps === 0) return;
   if(steps > 0){
     for(let s=0;s<steps;s++){
       const removedCol = grid.shift();
       const newWorldX = baseX + GRID_SIZE;
-      for(let j=0;j<GRID_SIZE;j++) updateCell(removedCol[j], newWorldX, baseZ + j);
+      for(let j=0;j<GRID_SIZE;j++){
+        updateCell(removedCol[j], newWorldX, baseZ + j);
+      }
       grid.push(removedCol);
       baseX += 1;
     }
@@ -189,7 +641,9 @@ const shiftX = (steps) => {
     for(let s=0;s<Math.abs(steps);s++){
       const removedCol = grid.pop();
       const newWorldX = baseX - 1;
-      for(let j=0;j<GRID_SIZE;j++) updateCell(removedCol[j], newWorldX, baseZ + j);
+      for(let j=0;j<GRID_SIZE;j++){
+        updateCell(removedCol[j], newWorldX, baseZ + j);
+      }
       grid.unshift(removedCol);
       baseX -= 1;
     }
@@ -197,6 +651,7 @@ const shiftX = (steps) => {
 };
 
 const shiftZ = (steps) => {
+  if(steps === 0) return;
   if(steps > 0){
     for(let s=0;s<steps;s++){
       const newWorldZ = baseZ + GRID_SIZE;
@@ -231,15 +686,9 @@ const recomputeBase = ()=> {
   if(dz !== 0) shiftZ(dz);
 };
 
-// --- Control del jugador ---
+
 const cameraEyeHeight = 2.0; 
 const playerPos = new THREE.Vector3(0, cameraEyeHeight, 0);
-
-(function placePlayerOnCenter(){
-  const mid = Math.floor(GRID_SIZE/2);
-  const centerCell = grid[mid][mid];
-  playerPos.set(centerCell.building.position.x, centerCell.building.userData.topY + cameraEyeHeight, centerCell.building.position.z);
-})();
 
 let jumping=false, jumpStartTime=0, jumpFrom=new THREE.Vector3(), jumpTo=new THREE.Vector3(), jumpPeak=4;
 function startJump(targetVec){
@@ -252,21 +701,172 @@ function startJump(targetVec){
   jumpPeak = Math.max(4, dist * 0.25 + 2);
 }
 
-// ------------------- INTEGRACIÓN DEL JUEGO -------------------
-initGame(scene, buildingGroup, document.getElementById('ui'));
 
-// ------------------- LOOP PRINCIPAL -------------------
+(function placePlayerOnCenter(){
+  const mid = Math.floor(GRID_SIZE/2);
+  let centerCell = grid[mid][mid];
+  if(centerCell && centerCell.building && centerCell.building.userData && centerCell.building.userData.worldPos){
+    const wp = centerCell.building.userData.worldPos;
+    const top = centerCell.building.userData.topY;
+    playerPos.set(wp.x, top + cameraEyeHeight, wp.z);
+  } else {
+    
+    outer:
+    for(let i=0;i<GRID_SIZE;i++){
+      for(let j=0;j<GRID_SIZE;j++){
+        const b = grid[i][j].building;
+        if(b && b.visible && b.userData && b.userData.worldPos){
+          playerPos.set(b.userData.worldPos.x, b.userData.topY + cameraEyeHeight, b.userData.worldPos.z);
+          break outer;
+        }
+      }
+    }
+  }
+})();
+
+
+let pointerLocked = false;
+let isTouching = false;
+let lastTouchX = 0, lastTouchY = 0;
+let touchMoved = false;
+
+
+document.addEventListener('pointerlockchange', () => {
+  pointerLocked = (document.pointerLockElement === renderer.domElement);
+  
+});
+
+
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if(e.pointerType !== 'touch' && !pointerLocked){
+    
+    try { renderer.domElement.requestPointerLock(); } catch(err) {  }
+  }
+  
+  if(e.pointerType === 'touch') return; 
+});
+
+
+document.addEventListener('mousemove', (e) => {
+  if(pointerLocked){
+    yaw -= e.movementX * 0.0025;
+    pitch = Math.max(-Math.PI/2 + 0.05, Math.min(Math.PI/2 - 0.05, pitch - e.movementY * 0.0025));
+    
+    updateHoverFromPoint(0,0, true);
+  }
+});
+
+
+let dragging=false, prevX=0, prevY=0, clickCandidate=false;
+renderer.domElement.addEventListener('pointerdown', (e)=>{ 
+  if(e.pointerType === 'touch') return;
+  if(pointerLocked) { clickCandidate = true; return; } 
+  dragging=true; prevX=e.clientX; prevY=e.clientY; clickCandidate=true;
+});
+window.addEventListener('pointerup',(e)=>{ 
+  if(e.pointerType === 'touch') return;
+  if(pointerLocked){
+    
+    onClickCenter();
+    clickCandidate=false;
+    return;
+  }
+  dragging=false; if(clickCandidate){ onClick(e); } clickCandidate=false; 
+});
+window.addEventListener('pointermove',(e)=>{ 
+  if(e.pointerType === 'touch') return;
+  if(!dragging || pointerLocked) return;
+  const dx=e.clientX-prevX, dy=e.clientY-prevY; 
+  yaw -= dx*0.008; pitch = Math.max(-Math.PI/2+.1, Math.min(Math.PI/2-.1, pitch - dy*0.008)); 
+  prevX=e.clientX; prevY=e.clientY; clickCandidate=false; 
+  updateHoverFromPoint(e.clientX, e.clientY, false);
+});
+
+
+renderer.domElement.addEventListener('touchstart', (ev)=>{
+  isTouching = true;
+  touchMoved = false;
+  const t = ev.touches[0];
+  lastTouchX = t.clientX; lastTouchY = t.clientY;
+  
+  ev.preventDefault();
+});
+renderer.domElement.addEventListener('touchmove', (ev)=>{
+  if(!isTouching) return;
+  const t = ev.touches[0];
+  const dx = t.clientX - lastTouchX;
+  const dy = t.clientY - lastTouchY;
+  
+  yaw -= dx * 0.0035;
+  pitch = Math.max(-Math.PI/2 + 0.05, Math.min(Math.PI/2 - 0.05, pitch - dy * 0.0035));
+  lastTouchX = t.clientX; lastTouchY = t.clientY;
+  touchMoved = true;
+  updateHoverFromPoint(t.clientX, t.clientY, false);
+  ev.preventDefault();
+}, { passive:false });
+renderer.domElement.addEventListener('touchend', (ev)=>{
+  
+  if(!touchMoved){
+    
+    updateHoverFromPoint(lastTouchX, lastTouchY, false);
+    if(hoverMarker.visible) {
+      
+      onClickTouch(lastTouchX, lastTouchY);
+    } else {
+      
+      onClickCenter();
+    }
+  }
+  isTouching = false;
+  ev.preventDefault();
+});
+
+
+function onClickCenter(){
+  
+  updateHoverFromPoint(0,0, true);
+  if(!hoverMarker.visible) return;
+  raycaster.setFromCamera({x:0,y:0}, camera);
+  const intersects = raycaster.intersectObjects(buildingGroup.children, true);
+  let found=null;
+  for(let it of intersects){ if(it.object && it.object.userData && it.object.userData.worldPos && it.object.visible){ found=it.object; break; } }
+  if(found){ const target = new THREE.Vector3(found.userData.worldPos.x, found.userData.topY + cameraEyeHeight, found.userData.worldPos.z); startJump(target); }
+}
+
+function onClickTouch(clientX, clientY){
+  
+  mouse.x = (clientX / window.innerWidth) * 2 - 1;
+  mouse.y = - (clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects(buildingGroup.children, true);
+  let found=null;
+  for(let it of intersects){ if(it.object && it.object.userData && it.object.userData.worldPos && it.object.visible){ found=it.object; break; } }
+  if(found){ const target = new THREE.Vector3(found.userData.worldPos.x, found.userData.topY + cameraEyeHeight, found.userData.worldPos.z); startJump(target); }
+}
+
+function onClick(e){
+  
+  updateHoverFromPoint(e.clientX, e.clientY, false);
+  if(!hoverMarker.visible) return;
+  const intersects = raycaster.intersectObjects(buildingGroup.children, true);
+  let found=null;
+  for(let it of intersects){ if(it.object && it.object.userData && it.object.userData.worldPos && it.object.visible){ found=it.object; break; } }
+  if(found){ const target = new THREE.Vector3(found.userData.worldPos.x, found.userData.topY + cameraEyeHeight, found.userData.worldPos.z); startJump(target); }
+}
+
+
 const clock = new THREE.Clock();
 (function animate(){
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), .05);
 
+  
   offsetX = playerPos.x; offsetZ = playerPos.z;
   recomputeBase();
 
   if(jumping){
     const t = (performance.now()/1000 - jumpStartTime) / JUMP_DURATION;
-    if(t>=1){ playerPos.copy(jumpTo); jumping=false; checkLanding(playerPos); }
+    if(t>=1){ playerPos.copy(jumpTo); jumping=false; }
     else {
       const curr = new THREE.Vector3().lerpVectors(jumpFrom, jumpTo, t);
       const y = THREE.MathUtils.lerp(jumpFrom.y, jumpTo.y, t) + Math.sin(Math.min(1, t)*Math.PI) * jumpPeak;
@@ -274,12 +874,20 @@ const clock = new THREE.Clock();
     }
   }
 
+  
   const dir = new THREE.Vector3(Math.sin(yaw), Math.sin(pitch), Math.cos(yaw)).normalize();
+
+  
   camera.position.copy(playerPos);
   camera.lookAt(playerPos.x + dir.x, playerPos.y + dir.y, playerPos.z + dir.z);
 
+  
+  if(pointerLocked) updateHoverFromPoint(0,0, true);
+
   renderer.render(scene, camera);
 })();
+
+
 });
 </script>
 </body>
