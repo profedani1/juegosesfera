@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Bolscity - Modular (Jumper / Flight)</title>
+<style>
+  body{margin:0;overflow:hidden;background:#87CEEB;font-family:system-ui,Segoe UI,Roboto,Arial}
+  canvas{display:block;width:100vw;height:100vh;touch-action:none}
+  #ui{position:fixed;left:10px;top:10px;padding:8px;background:rgba(255,255,255,.85);border-radius:6px;font-size:13px;z-index:9999}
+  #preguntaBox{position:fixed;right:12px;top:12px;z-index:99999;background:rgba(0,0,0,0.6);color:#fff;padding:10px 12px;border-radius:8px;font-family:monospace;min-width:220px}
+  #mensajeFinal{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.8);color:#fff;padding:18px;border-radius:12px;font-family:monospace;display:none;z-index:100000}
+  #controls{position:fixed;left:10px;bottom:10px;background:rgba(255,255,255,.9);padding:8px;border-radius:8px;z-index:9999}
+</style>
+</head>
+<body>
+  <div id="ui">Modo: <select id="modeSel"><option value="jump">Jumper</option><option value="flight">Flight</option></select>
+  <button id="startBtn">Iniciar</button></div>
+  <div id="preguntaBox"></div>
+  <div id="mensajeFinal"></div>
+  <div id="controls"><label><input type="checkbox" id="chkRecov"/> Recuperación</label></div>
+
+<script type="module">
+  import('./shared/core-scene.js').then(core=>{
+    const btn=document.getElementById('startBtn'), sel=document.getElementById('modeSel');
+    btn.addEventListener('click', async ()=>{
+      const mode=sel.value;
+      if(mode==='jump'){
+        const m = await import('./jump/main-jump.js'); m.start();
+      } else {
+        const m = await import('./flight/main-flight.js'); m.start();
+      }
+      btn.disabled=true; sel.disabled=true;
+    });
+  });
+</script>
+</body>
+</html>
