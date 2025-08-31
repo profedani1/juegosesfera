@@ -1,0 +1,38 @@
+// Utilidades de UI compartidas
+(function(global){
+  function setQuestion(text){
+    const el = document.getElementById('preguntaMain');
+    if(el) el.textContent = text || '--';
+  }
+
+  function setProgress(answered, total){
+    const el = document.getElementById('preguntaEstado');
+    if(el) el.textContent = `Respondidas: ${answered} / ${total}`;
+  }
+
+  function flashStatus(ok){
+    const el = document.getElementById('preguntaEstado');
+    if(!el) return;
+    el.style.color = ok ? '#9be7a6' : '#ff5b5b';
+    setTimeout(()=>{ el.style.color = '#9be7a6'; }, 900);
+  }
+
+  function showFeedback(text){
+    const el = document.getElementById('feedbackBanner');
+    if(!el) return;
+    el.style.display = 'block';
+    el.textContent = text;
+    setTimeout(()=> el.style.display='none', 900);
+  }
+
+  function showFinal(answered, total, onClose){
+    const el = document.getElementById('mensajeFinal');
+    if(!el) return;
+    el.style.display = 'block';
+    el.innerHTML = `<strong>¡Completado!</strong><br>Respondidas: ${answered}/${total}.<br><div class="btn" id="btnCloseEnd" style="margin-top:10px">Cerrar</div>`;
+    const btn = document.getElementById('btnCloseEnd');
+    if(btn) btn.onclick = () => { el.style.display='none'; if(onClose) onClose(); };
+  }
+
+  global.UI = { setQuestion, setProgress, flashStatus, showFeedback, showFinal };
+})(window);
