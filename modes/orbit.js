@@ -111,7 +111,8 @@
       const q = GameCore.state.currentQuestion;
       if(!q) return;
 
-      UI.setQuestion(q.question);
+      const isMistake = GameCore.state.recoveryModeActive;
+      UI.setQuestion(q.question, isMistake);
       UI.setProgress(GameCore.state.answeredCount, GameCore.state.availableQuestions.length);
 
       const options = q.options;
@@ -119,6 +120,8 @@
     },
 
     pick(nx, ny){
+      if(GameCore.state.paused) return;
+
       this.raycaster.setFromCamera(new THREE.Vector2(nx, ny), this.camera);
       const objects = this.burbujas.map(b=>b.userData.sphere);
       const ints = this.raycaster.intersectObjects(objects);
@@ -133,7 +136,8 @@
       const selectedTranslation = q.options[selectedIdx];
       const correct = selectedTranslation === q.translation;
 
-      // Llamada a GameCore que respeta recuperación si está activada
+      UI.showFeedback(correct ? '¡Correcto! ✅' : 'Incorrecto ❌');
+
       GameCore._answerProgressive(correct);
     },
 
@@ -167,8 +171,3 @@
 
   global.GameModes.orbit = Orbit;
 })(window);
-
-
-
-
-
