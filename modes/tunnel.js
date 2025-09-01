@@ -1,5 +1,6 @@
 (function(global){
   if(!global.GameModes) global.GameModes = {};
+
   const Tunnel = {
     style: 'coleccion',
     scene:null, camera:null, renderer:null, raycaster:null,
@@ -26,7 +27,6 @@
       this.currentPattern = null;
       UI.setQuestion('--');
       UI.setProgress(0, 0);
-      // core invoca beginRound()
     },
 
     destroy(){
@@ -45,27 +45,23 @@
         return;
       }
 
-      // elegir target aleatorio entre los no contestados
       this.targetIdx = remainingIdx[Math.floor(Math.random()*remainingIdx.length)];
       const q = GameCore.state.availableQuestions[this.targetIdx];
       if(!q){
-        // fallback: reiniciar ronda
         this._clearAllBubbles();
         return;
       }
       this.currentPattern = q.pattern;
-      UI.setQuestion(q.question);
+      const isMistake = GameCore.state.recoveryModeActive;
+      UI.setQuestion(q.question, isMistake);
 
-      // spawnBag con índices de las opciones del verbo actual
       this.spawnBag = q.options.map((_,i)=>i);
       shuffle(this.spawnBag);
 
-      // limpiar burbujas previas e iniciar timer
       this._clearAllBubbles();
       this._end();
       this.spawnTimer = setInterval(()=>this._spawnTick(), this.TUNNEL.SPAWN_INTERVAL_MS);
 
-      // spawns iniciales
       for(let i=0;i<3;i++) this._spawnTick();
     },
 
@@ -81,7 +77,7 @@
         shuffle(this.spawnBag);
       }
 
-      const optIdx = this.spawnBag.shift(); // índice en q.options
+      const optIdx = this.spawnBag.shift();
       const text = q.options[optIdx] || '---';
 
       const x = (Math.random()-0.5) * 1400;
@@ -124,7 +120,9 @@
     },
 
     pick(nx, ny){
+      if(GameCore.state.paused) return;
       if(!GameCore.state.availableQuestions.length) return;
+
       this.raycaster.setFromCamera(new THREE.Vector2(nx, ny), this.camera);
       const ints = this.raycaster.intersectObjects(this.burbujas.map(b=>b.userData.sphere));
       if(!ints.length) return;
@@ -136,19 +134,18 @@
       const q = aq[this.targetIdx];
       if(!q) return;
 
-      // idxParam es índice sobre q.options
       const selectedTranslation = q.options[group.userData.idxParam];
       const correct = selectedTranslation === q.translation;
 
       if(correct){
+        UI.showFeedback('¡Correcto! ✅');
         GameCore._onCorrectCollection(q.pattern);
-        // limpiar y comenzar nueva ronda
         this._clearAllBubbles();
         this._end();
         this.beginRound();
       } else {
-        GameCore._onWrongCollection(q.pattern);
         UI.showFeedback('Incorrecto ❌');
+        GameCore._onWrongCollection(q.pattern);
       }
     },
 
