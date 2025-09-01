@@ -1,8 +1,10 @@
-// Utilidades de UI compartidas
 (function(global){
-  function setQuestion(text){
+  function setQuestion(text, isMistake = false){
     const el = document.getElementById('preguntaMain');
-    if(el) el.textContent = text || '--';
+    if(el){
+      el.textContent = text || '--';
+      el.style.color = isMistake ? '#f66' : '#fff';
+    }
   }
 
   function setProgress(answered, total){
@@ -29,10 +31,27 @@
     const el = document.getElementById('mensajeFinal');
     if(!el) return;
     el.style.display = 'block';
-    el.innerHTML = `<strong>¡Completado!</strong><br>Respondidas: ${answered}/${total}.<br><div class="btn" id="btnCloseEnd" style="margin-top:10px">Cerrar</div>`;
+    el.innerHTML = `
+      <strong>¡Completado!</strong><br>
+      Respondidas: ${answered}/${total}.<br>
+      <div class="btn" id="btnCloseEnd" style="margin-top:10px">Cerrar</div>`;
     const btn = document.getElementById('btnCloseEnd');
     if(btn) btn.onclick = () => { el.style.display='none'; if(onClose) onClose(); };
   }
 
-  global.UI = { setQuestion, setProgress, flashStatus, showFeedback, showFinal };
+  function updateMistakeInfo(count, log){
+    const countEl = document.getElementById('mistakeCount');
+    const logEl = document.getElementById('mistakeLog');
+    if(countEl) countEl.textContent = count;
+    if(logEl && typeof log === 'string') logEl.value = log;
+  }
+
+  function toggleLog(){
+    const logEl = document.getElementById('mistakeLog');
+    if(logEl){
+      logEl.style.display = (logEl.style.display === 'none' || !logEl.style.display) ? 'block' : 'none';
+    }
+  }
+
+  global.UI = { setQuestion, setProgress, flashStatus, showFeedback, showFinal, updateMistakeInfo, toggleLog };
 })(window);
