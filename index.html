@@ -36,8 +36,8 @@
       <button id="btnRestart" class="btn">Reiniciar</button>
       <button id="btnPause" class="btn">Pausa</button>
       <button id="btnToggleLog" class="btn">Ver log</button>
-      <!-- Botón de recuperación dinámico -->
       <button id="btnRecovMode" class="btn" style="display:none">Modo recuperación</button>
+      <button id="btnClearMistakes" class="btn" style="display:none">Limpiar errores</button>
     </div>
   </div>
 
@@ -58,6 +58,7 @@
 <script src="./core/storage.js"></script>
 <script src="./core/ui.js"></script>
 <script src="./core/core.js"></script>
+
 <!-- Carga dinámica -->
 <script>
   (function bootstrap(){
@@ -82,6 +83,14 @@
       const ta = document.getElementById('mistakeLog');
       ta.style.display = (ta.style.display === 'none' || !ta.style.display) ? 'block' : 'none';
     };
+    document.getElementById('btnClearMistakes').onclick = () => {
+      if(confirm('¿Borrar todos los errores guardados?')){
+        StorageAPI.saveMistakes([]);
+        const ta = document.getElementById('mistakeLog');
+        ta.value = '';
+        document.getElementById('mistakeCount').textContent = '0';
+      }
+    };
     select.onchange = () => {
       window.GameCore.stop();
       loadModeAndStart();
@@ -93,5 +102,4 @@
 </script>
 </body>
 </html>
-
 
