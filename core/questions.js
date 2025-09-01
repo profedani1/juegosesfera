@@ -1,34 +1,30 @@
 // Generador de preguntas (compartido por todos los modos)
-(function(global){
+(function (global) {
+  // === Diccionario de verbos con raíces ===
   const verbs = {
-     rest: { rootEn: "REST", rootEs: "DESCANS" },
-     work: { rootEn: "WORK", rootEs: "TRABAJ" },
-     walk: { rootEn: "WALK", rootEs: "CAMIN" },
-     help: { rootEn: "HELP", rootEs: "AYUD" },
-     visit: { rootEn: "VISIT", rootEs: "VISIT" },
-     wait: { rootEn: "WAIT", rootEs: "ESPER" }
+    rest: { rootEn: "REST", rootEs: "DESCANS" },
+    work: { rootEn: "WORK", rootEs: "TRABAJ" },
+    walk: { rootEn: "WALK", rootEs: "CAMIN" },
+    help: { rootEn: "HELP", rootEs: "AYUD" },
+    visit: { rootEn: "VISIT", rootEs: "VISIT" },
+    wait: { rootEn: "WAIT", rootEs: "ESPER" }
   };
 
+  // === Lista de pronombres ===
   const pronouns = [
-    "I","I HAVE","IF I",
-    "YOU","YOU HAVE","IF YOU",
-    "HE","HE HAS","IF HE",
-    "WE","WE HAVE","IF WE",
-    "YOU ALL","YOU ALL HAVE","IF YOU ALL",
-    "THEY","THEY HAVE","IF THEY"
+    "I", "I HAVE", "IF I",
+    "YOU", "YOU HAVE", "IF YOU",
+    "HE", "HE HAS", "IF HE",
+    "WE", "WE HAVE", "IF WE",
+    "YOU ALL", "YOU ALL HAVE", "IF YOU ALL",
+    "THEY", "THEY HAVE", "IF THEY"
   ];
 
-  // Genera preguntas para un verbo + pronombre.
-  // Cada item incluye:
-  //  - question: texto mostrado (con root reemplazado)
-  //  - translation: traducción mostrada (con rootEs reemplazado)
-  //  - pattern: plantilla SIN ESCAPAR (ej. "YOU HAVE {rootEn}ED")
-  //  - templateQuestion: la plantilla original (idem pattern)
-  //  - templateTranslation: plantilla de la traducción (ej. "{rootEs}ADO")
-  function generateQuestions(verb, pronoun){
+  // === Generador dinámico de preguntas ===
+  function generateQuestions(verb, pronoun) {
     const { rootEn, rootEs } = verb;
 
-    if(pronoun === 'I') return [
+     if(pronoun === 'I') return [
       { question:`I ${rootEn}ED`, translation:`${rootEs}É`, pattern:`I {rootEn}ED`, templateQuestion:`I {rootEn}ED`, templateTranslation:`{rootEs}É` },
       { question:`I USED TO ${rootEn}`, translation:`${rootEs}ABA`, pattern:`I USED TO {rootEn}`, templateQuestion:`I USED TO {rootEn}`, templateTranslation:`{rootEs}ABA` },
       { question:`I ${rootEn}`, translation:`${rootEs}O`, pattern:`I {rootEn}`, templateQuestion:`I {rootEn}`, templateTranslation:`{rootEs}O` },
@@ -151,51 +147,51 @@
     return [];
   }
 
-  function shuffleArray(arr){
+  // === Función para barajar ===
+  function shuffleArray(arr) {
     const a = arr.slice();
-    for(let i=a.length-1;i>0;i--){
-      const j = Math.floor(Math.random()*(i+1));
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
       [a[i], a[j]] = [a[j], a[i]];
     }
     return a;
   }
 
-  // === buildPool corregido: cada entrada tiene .options (solo traducciones del mismo verbo)
-  function buildPoolFromVerbsPronouns(){
+  // === Construcción del pool para TODOS los modos ===
+  function buildPoolFromVerbsPronouns() {
     const pool = [];
-    const verbKeys = shuffleArray(Object.keys(verbs));   // verbos en orden aleatorio
-    let pronounOrder = shuffleArray(pronouns);           // pronombres en orden aleatorio
+    const verbKeys = shuffleArray(Object.keys(verbs)); // verbos aleatorios
+    let pronounOrder = shuffleArray(pronouns); // pronombres aleatorios
     let pIndex = 0;
 
-    for(const vk of verbKeys){
+    for (const vk of verbKeys) {
       const verb = verbs[vk];
 
-      // cada verbo toma un pronombre de pronounOrder; al agotarse, rebarajar pronombres
+      // asigna un pronombre aleatorio, recicla si se acaba la lista
       const pronoun = pronounOrder[pIndex];
       pIndex++;
-      if(pIndex >= pronounOrder.length){
+      if (pIndex >= pronounOrder.length) {
         pronounOrder = shuffleArray(pronouns);
         pIndex = 0;
       }
 
-      // generamos todas las preguntas para ESTE verbo+pronombre
+      // genera todas las preguntas para este verbo+pronombre
       const questionsForThisPair = generateQuestions(verb, pronoun);
 
-      // obtenemos SOLO las traducciones de ESTE verbo (para usar como opciones)
+      // obtiene solo las traducciones de este verbo para opciones
       const translationsSameVerb = questionsForThisPair.map(q => q.translation);
 
-      // añadimos cada pregunta al pool, pero con la propiedad options que contiene solo traducciones del mismo verbo
-      for(const q of questionsForThisPair){
+      // agrega cada pregunta al pool con metadata completa
+      for (const q of questionsForThisPair) {
         pool.push({
           question: q.question,
           translation: q.translation,
-          pattern: q.pattern,                 // plantilla NO escapada, ej. "YOU HAVE {rootEn}ED"
+          pattern: q.pattern,
           templateQuestion: q.templateQuestion,
           templateTranslation: q.templateTranslation,
           verbKey: vk,
           pronoun: pronoun,
-          // opciones seguras (solo traducciones del mismo verbo)
-          options: shuffleArray(translationsSameVerb)
+          options: shuffleArray(translationsSameVerb) // opciones seguras
         });
       }
     }
@@ -203,5 +199,6 @@
     return pool;
   }
 
+  // === Exposición global ===
   global.QuestionBank = { buildPoolFromVerbsPronouns };
 })(window);
