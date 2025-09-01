@@ -45,14 +45,12 @@
         }
       });
 
-      // primera pregunta
       UI.setQuestion('--');
     },
 
     destroy(){
       for(const b of this.burbujas) this.scene.remove(b);
       this.burbujas.length = 0;
-
       window.removeEventListener('mousedown', this._onDown);
       window.removeEventListener('mouseup', this._onUp);
       window.removeEventListener('mousemove', this._onMove);
@@ -93,7 +91,6 @@
         radius
       };
 
-      // posición aleatoria inicial
       const u=Math.random(), v=Math.random();
       const theta=2*Math.PI*u, phi=Math.acos(2*v-1);
       const r=this.BALS.RADIO_LIMITE*(0.6+Math.random()*0.4);
@@ -117,8 +114,7 @@
       UI.setQuestion(q.question);
       UI.setProgress(GameCore.state.answeredCount, GameCore.state.availableQuestions.length);
 
-      // USAR SOLO LAS OPCIONES DEL VERBO ACTUAL
-      const options = q.options; // ya viene mezclado en question.js
+      const options = q.options;
       options.forEach((opt, idx) => this._createBubble(idx, opt));
     },
 
@@ -136,6 +132,8 @@
       const q = GameCore.state.currentQuestion;
       const selectedTranslation = q.options[selectedIdx];
       const correct = selectedTranslation === q.translation;
+
+      // Llamada a GameCore que respeta recuperación si está activada
       GameCore._answerProgressive(correct);
     },
 
@@ -151,7 +149,6 @@
         if(b.userData.sprite) b.userData.sprite.quaternion.copy(this.camera.quaternion);
       }
 
-      // orbitar cámara
       const blend = dt*4;
       this.rotY += (this.targetRotY - this.rotY)*blend;
       this.rotX += (this.targetRotX - this.rotX)*blend;
@@ -170,4 +167,9 @@
 
   global.GameModes.orbit = Orbit;
 })(window);
+
+
+  global.GameModes.orbit = Orbit;
+})(window);
+
 
