@@ -1,4 +1,4 @@
-// Núcleo del motor: escena, cámara, renderer, input y ciclo principal.
+// core.js — GameCore con botón de recuperación condicional
 (function(global){
   const GameCore = {
     three: { scene:null, camera:null, renderer:null, raycaster:null },
@@ -13,20 +13,19 @@
       currentQuestion:null,
       availableQuestions:[],
       usedIndexSet: new Set(),
-      recoveryOn: false,    // indica si estamos en modo recuperación activo
-      pendingIndex: null    // índice temporal mientras esperamos acierto en recuperación
-    },
-    // flag interno para saber si la recuperación fue iniciada temporalmente por el botón
-    _temporaryRecovery: false
+      recoveryOn: false,
+      pendingIndex: null
+    }
   };
 
-  // --- Inicialización Three.js
+  // init three
   function initThree(){
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(80, innerWidth/innerHeight, 0.1, 10000);
     const renderer = new THREE.WebGLRenderer({ antialias:true });
     renderer.setSize(innerWidth, innerHeight);
-    document.getElementById('container').appendChild(renderer.domElement);
+    const container = document.getElementById('container');
+    if(container) container.appendChild(renderer.domElement);
     scene.add(new THREE.AmbientLight(0x666666));
     const pt = new THREE.PointLight(0xffffff,1); pt.position.set(200,200,400); scene.add(pt);
     const raycaster = new THREE.Raycaster();
@@ -40,24 +39,18 @@
 
     const dom = renderer.domElement;
     function normFromEvent(ev, rect){
-      return {
-        x: ((ev.clientX-rect.left)/rect.width)*2 - 1,
-        y: -((ev.clientY-rect.top)/rect.height)*2 + 1
-      };
+      return { x: ((ev.clientX-rect.left)/rect.width)*2 - 1, y: -((ev.clientY-rect.top)/rect.height)*2 + 1 };
     }
-
-    dom.addEventListener('click', (ev)=>{
+    dom?.addEventListener('click', (ev)=>{
       if(GameCore.state.modeImpl?.pick){
         const rect = dom.getBoundingClientRect();
         const n = normFromEvent(ev, rect);
         GameCore.state.modeImpl.pick(n.x, n.y);
       }
     });
-
-    dom.addEventListener('touchstart', (e)=>{
+    dom?.addEventListener('touchstart', (e)=>{
       if(GameCore.state.modeImpl?.pick && e.touches.length===1){
-        const t=e.touches[0];
-        const rect = dom.getBoundingClientRect();
+        const t=e.touches[0], rect = dom.getBoundingClientRect();
         const nx = ((t.clientX-rect.left)/rect.width)*2 - 1;
         const ny = -((t.clientY-rect.top)/rect.height)*2 + 1;
         GameCore.state.modeImpl.pick(nx, ny);
@@ -65,82 +58,50 @@
     }, {passive:true});
   }
 
-  // --- UI: botón de recuperación temporal (aparece solo si hay >= 10 errores)
-  function updateRecoveryButtonVisibility(){
-    try {
-      const mistakes = StorageAPI.getMistakes();
-      const count = Array.isArray(mistakes) ? mistakes.length : 0;
-      let btn = document.getElementById('btnTempRecov');
-      if(count >= 10 && !GameCore._temporaryRecovery){
-        // crear botón si no existe
-        if(!btn){
-          btn = document.createElement('button');
-          btn.id = 'btnTempRecov';
-          btn.textContent = 'Iniciar recuperación';
-          btn.style.marginLeft = '8px';
-          btn.onclick = startTemporaryRecovery;
-          // intentar añadir cerca de controles si existe
-          const container = document.getElementById('controls') || document.getElementById('uiControls') || document.getElementById('menu') || document.body;
-          container.appendChild(btn);
-        } else {
-          btn.style.display = '';
-          btn.disabled = false;
-        }
-      } else {
-        // ocultar botón cuando no corresponde
-        if(btn && !GameCore._temporaryRecovery) btn.remove();
-      }
-    } catch(e){}
-  }
-
-  // arrancar sesión de recuperación temporal (botón)
-  function startTemporaryRecovery(){
-    // no iniciar si ya estamos en recuperación
-    if(GameCore._temporaryRecovery) return;
-    GameCore._temporaryRecovery = true;
-    GameCore.state.recoveryOn = true;
-    // cambiar texto del botón si existe
-    const btn = document.getElementById('btnTempRecov');
-    if(btn){ btn.textContent = 'Recuperación (activa)'; btn.disabled = true; }
-
-    // preparar pool y comenzar la sesión correspondiente
-    preparePool();
-    if(GameCore.state.modeImpl?.style === 'coleccion') beginSessionCollection();
-    else beginSessionProgressive();
-  }
-
-  // terminar recuperación temporal: desactivar flags y reiniciar modo normal
-  function endTemporaryRecoveryAndRestart(){
-    GameCore._temporaryRecovery = false;
-    GameCore.state.recoveryOn = false;
-    // remover botón si existe
-    const btn = document.getElementById('btnTempRecov');
-    if(btn) btn.remove();
-    // reconstruir pool y reiniciar en modo normal
-    preparePool();
-    if(GameCore.state.modeImpl){
-      GameCore.state.modeImpl.init && GameCore.state.modeImpl.init(GameCore.three);
-      if(GameCore.state.modeImpl.style === 'coleccion') beginSessionCollection();
-      else beginSessionProgressive();
-    }
-  }
-
-  // --- Preparación de preguntas con modo recuperación
+  // prepara pool (si recoveryOn => filtra por errores)
   function preparePool(){
     const mistakes = StorageAPI.getMistakes();
     const all = QuestionBank.buildPoolFromVerbsPronouns();
-    // Si recoveryOn está activado por código (botón) o por checkbox
-    const recoveryChecked = GameCore.state.recoveryOn || document.getElementById('chkRecov')?.checked;
-    if(recoveryChecked && mistakes.length){
+    if(GameCore.state.recoveryOn && mistakes.length){
       const filtered = all.filter(q => mistakes.some(m => m.pattern === q.pattern));
       GameCore.state.pool = filtered.length ? filtered : all;
-      GameCore.state.recoveryOn = !!filtered.length;
     } else {
       GameCore.state.pool = all;
-      GameCore.state.recoveryOn = false;
     }
-    // actualizar botón en función del número de errores
-    updateRecoveryButtonVisibility();
+    refreshRecoveryButton(); // actualizar visibilidad del botón
+  }
+
+  // Mostrar/ocultar botón recovery según errores >= 10
+  function refreshRecoveryButton(){
+    const btn = document.getElementById('btnRecovMode');
+    const mistakes = StorageAPI.getMistakes();
+    if(!btn) return;
+    if(mistakes.length >= 10 && !GameCore.state.recoveryOn){
+      btn.style.display = ''; // visible
+      btn.disabled = false;
+    } else {
+      btn.style.display = 'none';
+    }
+  }
+
+  // activar/desactivar recuperación
+  function enableRecovery(){
+    if(GameCore.state.recoveryOn) return;
+    GameCore.state.recoveryOn = true;
+    preparePool();
+    beginSessionProgressive();
+    const btn = document.getElementById('btnRecovMode');
+    if(btn) { btn.textContent = 'Recuperación: ON'; btn.disabled = true; }
+  }
+  function disableRecovery(){
+    if(!GameCore.state.recoveryOn) return;
+    GameCore.state.recoveryOn = false;
+    const btn = document.getElementById('btnRecovMode');
+    if(btn) { btn.textContent = 'Modo recuperación'; btn.style.display='none'; }
+    preparePool();
+    // volver a modo normal: reiniciar sesión
+    if(GameCore.state.modeImpl?.style === 'coleccion') beginSessionCollection();
+    else beginSessionProgressive();
   }
 
   // --- Sesión progresiva
@@ -157,72 +118,67 @@
   function nextQuestionProgressive(){
     const aq = GameCore.state.availableQuestions;
     if(!aq.length){
-      // si esto ocurre al terminar recuperación temporal, finalizamos y volvemos a normal
-      UI.showFinal(GameCore.state.answeredCount, 0, ()=>{
-        if(GameCore._temporaryRecovery) { endTemporaryRecoveryAndRestart(); return; }
-        GameCore.restart();
-      });
+      // si acabó la recuperación, desactivar y volver a normal
+      if(GameCore.state.recoveryOn){
+        UI.showFinal(GameCore.state.answeredCount, 0, ()=>{ disableRecovery(); });
+      } else {
+        UI.showFinal(GameCore.state.answeredCount, 0, ()=>GameCore.restart());
+      }
       return;
     }
 
     let nextIdx = null;
     for(let i=0;i<aq.length;i++) if(!GameCore.state.usedIndexSet.has(i)){ nextIdx=i; break; }
-
     if(nextIdx === null){
-      UI.showFinal(GameCore.state.answeredCount, aq.length, ()=>{
-        if(GameCore._temporaryRecovery) { endTemporaryRecoveryAndRestart(); return; }
-        GameCore.restart();
-      });
+      if(GameCore.state.recoveryOn){
+        UI.showFinal(GameCore.state.answeredCount, aq.length, ()=>{ disableRecovery(); });
+      } else {
+        UI.showFinal(GameCore.state.answeredCount, aq.length, ()=>GameCore.restart());
+      }
       return;
     }
 
-    // Guardamos el índice en pendingIndex en ambos modos; la semántica de avanzar/repitir la decide answerProgressive
+    // en ambos modos guardamos pendingIndex; comportamiento (avance/repita) se decide en answerProgressive
     GameCore.state.pendingIndex = nextIdx;
-
     const q = aq[nextIdx];
     GameCore.state.currentQuestion = q;
 
     UI.setQuestion(q.question);
     UI.setProgress(GameCore.state.answeredCount, aq.length);
-
     if(GameCore.state.modeImpl?.presentOptionsForCurrent){
       GameCore.state.modeImpl.presentOptionsForCurrent(q.options, q.translation);
     }
   }
 
+  // respuesta en modo progresivo
   function answerProgressive(correct){
     const q = GameCore.state.currentQuestion;
     if(!q) return;
-
     const pIdx = GameCore.state.pendingIndex;
 
-    // --- MODO RECUPERACIÓN (activo cuando recoveryOn === true)
     if(GameCore.state.recoveryOn){
+      // RECUPERACIÓN: si acierta -> quitar error y marcar usado; si falla -> marcar error y avanzar
       if(correct){
-        // en recuperación, el acierto ELIMINA el error
         StorageAPI.clearIfCorrect(q.pattern);
-        // marcar como respondida para no volver en esta sesión
         if(typeof pIdx === 'number') GameCore.state.usedIndexSet.add(pIdx);
         GameCore.state.answeredCount++;
         UI.showFeedback('Correcto ✅');
         UI.flashStatus(true);
       } else {
-        // en recuperación, el fallo se marca (se mantiene el error) y avanzamos: NO repetimos
         StorageAPI.markWrong(q.pattern);
-        if(typeof pIdx === 'number') GameCore.state.usedIndexSet.add(pIdx);
+        if(typeof pIdx === 'number') GameCore.state.usedIndexSet.add(pIdx); // no se repite en recovery
         UI.showFeedback('Incorrecto ❌');
         UI.flashStatus(false);
       }
       GameCore.state.pendingIndex = null;
-      // actualizar visibilidad del botón (puede que ya no haya 10 errores o sí)
-      updateRecoveryButtonVisibility();
+      refreshRecoveryButton();
       setTimeout(nextQuestionProgressive, 600);
       return;
     }
 
-    // --- MODO NORMAL (NO descontar errores al acertar)
+    // MODO NORMAL: si acierta -> avanzar; si falla -> marcar error pero repetir pregunta hasta acertar
     if(correct){
-      // en normal, no eliminamos el registro de error aunque hubieras fallado antes
+      // **NO** quitar error aquí (persisten para la próxima recuperación)
       UI.showFeedback('Correcto ✅');
       GameCore.state.answeredCount++;
       UI.flashStatus(true);
@@ -230,23 +186,19 @@
       GameCore.state.pendingIndex = null;
       setTimeout(nextQuestionProgressive, 600);
     } else {
-      // fallo: registrar error y REPETIR la misma pregunta hasta acertar
       StorageAPI.markWrong(q.pattern);
       UI.showFeedback('Incorrecto ❌');
       UI.flashStatus(false);
-      // actualizar botón por si alcanzamos 10 errores
-      updateRecoveryButtonVisibility();
-      // re-presentar mismas opciones (opcional: rebarajar)
+      // re-presentar pero no borrar el error
       if(GameCore.state.modeImpl?.presentOptionsForCurrent){
-        const opts = q.options.slice();
-        shuffle(opts);
+        const opts = q.options.slice(); shuffle(opts);
         GameCore.state.modeImpl.presentOptionsForCurrent(opts, q.translation);
       }
-      // no avanzamos; la misma pregunta queda activa
+      refreshRecoveryButton();
     }
   }
 
-  // --- Sesión estilo Colección
+  // --- Sesión colección
   function beginSessionCollection(){
     GameCore.state.style = 'coleccion';
     GameCore.state.availableQuestions = GameCore.state.pool.slice();
@@ -257,20 +209,16 @@
   }
 
   function onCorrectCollection(targetPattern){
-    // En colección, solo quitar error si estamos en modo recuperación
-    if(GameCore.state.recoveryOn){
-      StorageAPI.clearIfCorrect(targetPattern);
-    }
+    StorageAPI.clearIfCorrect(targetPattern); // colección: borrar solo si se acierta en recovery
     const idx = GameCore.state.availableQuestions.findIndex(q=>q.pattern===targetPattern);
     if(idx>=0) GameCore.state.answeredSet.add(idx);
     UI.flashStatus(true);
     UI.setProgress(GameCore.state.answeredSet.size, GameCore.state.availableQuestions.length);
-
-    // Si completamos y era una recuperación temporal, volvemos a normal
+    refreshRecoveryButton();
     if(GameCore.state.answeredSet.size === GameCore.state.availableQuestions.length){
-      UI.showFinal(GameCore.state.answeredSet.size, GameCore.state.availableQuestions.length, ()=>{
-        if(GameCore._temporaryRecovery){ endTemporaryRecoveryAndRestart(); return; }
-        GameCore.restart();
+      UI.showFinal(GameCore.state.answeredSet.size, GameCore.state.availableQuestions.length, ()=> {
+        if(GameCore.state.recoveryOn) disableRecovery();
+        else GameCore.restart();
       });
     }
   }
@@ -278,39 +226,42 @@
   function onWrongCollection(targetPattern){
     StorageAPI.markWrong(targetPattern);
     UI.flashStatus(false);
-    // actualizar botón de recuperación por si llegamos a 10 errores
-    updateRecoveryButtonVisibility();
+    refreshRecoveryButton();
   }
 
-  // --- util
+  // util shuffle
   function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } }
 
-  // --- ciclo
+  // loop
   let last = performance.now();
   function animate(now=performance.now()){
     requestAnimationFrame(animate);
     if(GameCore.state.paused){ last = now; return; }
-    const dt = (now - last)/1000;
-    last = now;
+    const dt = (now - last)/1000; last = now;
     GameCore.state.modeImpl?.update?.(dt);
     if(GameCore.three.renderer && GameCore.three.scene && GameCore.three.camera){
       GameCore.three.renderer.render(GameCore.three.scene, GameCore.three.camera);
     }
   }
 
-  // --- API pública
+  // API pública
   GameCore.start = function(modeName){
     if(!GameCore.three.renderer) initThree();
-    StorageAPI.saveMistakes(StorageAPI.getMistakes());
-    // actualizar botón en inicio
-    updateRecoveryButtonVisibility();
-
     preparePool();
     GameCore.state.modeName = modeName;
     GameCore.state.modeImpl  = (global.GameModes && global.GameModes[modeName]) || null;
     if(!GameCore.state.modeImpl) throw new Error(`Modo no encontrado: ${modeName}`);
-
     GameCore.state.modeImpl?.init?.(GameCore.three);
+
+    // conectar botón de recuperación (crea si no existe)
+    let btn = document.getElementById('btnRecovMode');
+    if(!btn){
+      const wrap = document.getElementById('controls') || document.body;
+      btn = document.createElement('button'); btn.id='btnRecovMode'; btn.textContent='Modo recuperación';
+      btn.style.display='none'; btn.onclick = ()=> enableRecovery();
+      wrap.appendChild(btn);
+    }
+    refreshRecoveryButton();
 
     if(GameCore.state.modeImpl.style === 'coleccion') beginSessionCollection();
     else beginSessionProgressive();
@@ -320,12 +271,7 @@
 
   GameCore.restart = function(){
     GameCore.state.modeImpl?.destroy?.();
-    // antes de reiniciar normal, asegurarnos de limpiar recovery temporal si estaba marcada
-    if(GameCore._temporaryRecovery){
-      // si reinicia manualmente durante recuperación, finalizamos la recuperación
-      endTemporaryRecoveryAndRestart();
-      return;
-    }
+    GameCore.state.recoveryOn = false;
     preparePool();
     GameCore.state.modeImpl?.init?.(GameCore.three);
     if(GameCore.state.modeImpl.style === 'coleccion') beginSessionCollection();
