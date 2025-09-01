@@ -1,4 +1,3 @@
-// Núcleo del motor: escena, cámara, renderer, input y ciclo principal.
 (function(global){
   const GameCore = {
     three: { scene:null, camera:null, renderer:null, raycaster:null },
@@ -105,10 +104,9 @@
     }
 
     if(GameCore.state.recoveryOn){
-      GameCore.state.pendingIndex = nextIdx; // espera hasta que acierte
+      GameCore.state.pendingIndex = nextIdx; // en recuperación elegimos y avanzamos siempre
     } else {
-      GameCore.state.usedIndexSet.add(nextIdx);
-      GameCore.state.pendingIndex = null;
+      GameCore.state.pendingIndex = nextIdx; // en normal, también, pero no marcamos usado hasta acertar
     }
 
     const q = aq[nextIdx];
@@ -126,43 +124,48 @@
     const q = GameCore.state.currentQuestion;
     if(!q) return;
 
+    const pIdx = GameCore.state.pendingIndex;
+
     if(GameCore.state.recoveryOn){
-      const pIdx = GameCore.state.pendingIndex;
+      // --- MODO RECUPERACIÓN ---
       if(correct){
         StorageAPI.clearIfCorrect(q.pattern);
         if(typeof pIdx === 'number') GameCore.state.usedIndexSet.add(pIdx);
         GameCore.state.answeredCount++;
         UI.showFeedback('Correcto ✅');
         UI.flashStatus(true);
-        GameCore.state.pendingIndex = null;
-        setTimeout(nextQuestionProgressive, 500);
       } else {
         StorageAPI.markWrong(q.pattern);
         UI.showFeedback('Incorrecto ❌');
         UI.flashStatus(false);
-        // re-presentar opciones del mismo q
-        if(GameCore.state.modeImpl?.presentOptionsForCurrent){
-          const opts = q.options.slice();
-          for(let i=opts.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [opts[i],opts[j]]=[opts[j],opts[i]]; }
-          GameCore.state.modeImpl.presentOptionsForCurrent(opts, q.translation);
-        }
+        // NO repetimos, simplemente marcamos el error
+        if(typeof pIdx === 'number') GameCore.state.usedIndexSet.add(pIdx);
       }
+      GameCore.state.pendingIndex = null;
+      setTimeout(nextQuestionProgressive, 600);
       return;
     }
 
-    // Modo normal
+    // --- MODO NORMAL ---
     if(correct){
       StorageAPI.clearIfCorrect(q.pattern);
       UI.showFeedback('Correcto ✅');
       GameCore.state.answeredCount++;
       UI.flashStatus(true);
+      if(typeof pIdx === 'number') GameCore.state.usedIndexSet.add(pIdx);
+      GameCore.state.pendingIndex = null;
+      setTimeout(nextQuestionProgressive, 600);
     } else {
       StorageAPI.markWrong(q.pattern);
       UI.showFeedback('Incorrecto ❌');
       UI.flashStatus(false);
+      // Repetimos la misma pregunta hasta acertar
+      if(GameCore.state.modeImpl?.presentOptionsForCurrent){
+        const opts = q.options.slice();
+        shuffle(opts);
+        GameCore.state.modeImpl.presentOptionsForCurrent(opts, q.translation);
+      }
     }
-
-    setTimeout(nextQuestionProgressive, 600);
   }
 
   // --- Sesión estilo Colección
@@ -249,4 +252,3 @@
 
   global.GameCore = GameCore;
 })(window);
-
