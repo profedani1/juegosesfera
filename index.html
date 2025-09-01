@@ -61,13 +61,16 @@
 
 <!-- Carga dinámica -->
 <script>
-  (function bootstrap(){
+  (function bootstrap() {
     const params = new URLSearchParams(location.search);
     const modeParam = params.get('mode');
     const select = document.getElementById('modeSelect');
-    if(modeParam) select.value = modeParam;
+    if (modeParam) select.value = modeParam;
 
-    function loadModeAndStart(){
+    const btnRecov = document.getElementById('btnRecovMode');
+    const btnClear = document.getElementById('btnClearMistakes');
+
+    function loadModeAndStart() {
       const modeName = select.value;
       const s = document.createElement('script');
       s.src = `modes/${modeName}.js`;
@@ -76,21 +79,42 @@
       document.body.appendChild(s);
     }
 
+    // Mostrar botones si hay errores
+    const hasMistakes = StorageAPI.hasMistakes && StorageAPI.hasMistakes();
+    if (hasMistakes) {
+      btnRecov.style.display = 'inline-block';
+      btnClear.style.display = 'inline-block';
+    }
+
     // Botones generales
     document.getElementById('btnRestart').onclick = () => window.GameCore.restart();
-    document.getElementById('btnPause').onclick   = () => window.GameCore.togglePause();
+    document.getElementById('btnPause').onclick = () => window.GameCore.togglePause();
     document.getElementById('btnToggleLog').onclick = () => {
       const ta = document.getElementById('mistakeLog');
       ta.style.display = (ta.style.display === 'none' || !ta.style.display) ? 'block' : 'none';
     };
-    document.getElementById('btnClearMistakes').onclick = () => {
-      if(confirm('¿Borrar todos los errores guardados?')){
+    btnClear.onclick = () => {
+      if (confirm('¿Borrar todos los errores guardados?')) {
         StorageAPI.saveMistakes([]);
         const ta = document.getElementById('mistakeLog');
         ta.value = '';
         document.getElementById('mistakeCount').textContent = '0';
+        btnRecov.style.display = 'none';
+        btnClear.style.display = 'none';
       }
     };
+
+    // Botón modo recuperación
+    btnRecov.onclick = () => {
+      const s = document.createElement('script');
+      s.src = 'modes/recovery.js';
+      s.onload = () => {
+        window.GameCore.start('recovery', StorageAPI.getMistakes());
+      };
+      document.body.appendChild(s);
+    };
+
+    // Cambio de modo normal
     select.onchange = () => {
       window.GameCore.stop();
       loadModeAndStart();
@@ -100,6 +124,8 @@
     loadModeAndStart();
   })();
 </script>
+
 </body>
 </html>
+
 
