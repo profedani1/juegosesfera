@@ -5,74 +5,91 @@
     scene:null, camera:null, renderer:null, raycaster:null,
     burbujas:[],
     spawnTimer:null,
+    spawnBag:[],
+    targetIdx: null,
+    currentPattern: null,
     TUNNEL: { SPAWN_INTERVAL_MS: 1200, BURBUJA_RADIO: 150, SPAWN_Z: -3400, DESPAWN_Z: 400, BASE_VEL: 380 },
 
     init(three){
-      this.scene = three.scene; this.camera = three.camera;
-      this.renderer = three.renderer; this.raycaster = three.raycaster;
+      this.scene = three.scene;
+      this.camera = three.camera;
+      this.renderer = three.renderer;
+      this.raycaster = three.raycaster;
 
-      this.camera.position.set(0,0,0); this.camera.lookAt(0,0,-1);
+      // cámara fija hacia -Z
+      this.camera.position.set(0,0,0);
+      this.camera.lookAt(0,0,-1);
+
       this.burbujas.length = 0;
-      UI.setQuestion('--');
-
       this.spawnBag = [];
-      this.targetBag = [];
       this.targetIdx = null;
       this.currentPattern = null;
+      UI.setQuestion('--');
+      UI.setProgress(0, 0);
+      // core invoca beginRound()
     },
 
     destroy(){
       this._end();
-      for(const b of this.burbujas) this.scene.remove(b);
-      this.burbujas.length = 0;
+      this._clearAllBubbles();
+      this.spawnBag.length = 0;
     },
 
     beginRound(){
       const total = GameCore.state.availableQuestions.length;
-      const remainingIdx = GameCore.state.availableQuestions.map((_,i)=>i)
-                             .filter(i=>!GameCore.state.answeredSet.has(i));
+      UI.setProgress(GameCore.state.answeredSet.size, total);
 
+      const remainingIdx = GameCore.state.availableQuestions.map((_,i)=>i).filter(i=>!GameCore.state.answeredSet.has(i));
       if(!remainingIdx.length){
         UI.showFinal(GameCore.state.answeredSet.size, total, ()=>GameCore.restart());
         return;
       }
 
-      // Elegir target
+      // elegir target aleatorio entre los no contestados
       this.targetIdx = remainingIdx[Math.floor(Math.random()*remainingIdx.length)];
       const q = GameCore.state.availableQuestions[this.targetIdx];
+      if(!q){
+        // fallback: reiniciar ronda
+        this._clearAllBubbles();
+        return;
+      }
       this.currentPattern = q.pattern;
       UI.setQuestion(q.question);
 
-      // Llenar spawnBag con indices de opciones del verbo actual
+      // spawnBag con índices de las opciones del verbo actual
       this.spawnBag = q.options.map((_,i)=>i);
       shuffle(this.spawnBag);
 
-      if(this.spawnTimer) clearInterval(this.spawnTimer);
+      // limpiar burbujas previas e iniciar timer
+      this._clearAllBubbles();
+      this._end();
       this.spawnTimer = setInterval(()=>this._spawnTick(), this.TUNNEL.SPAWN_INTERVAL_MS);
 
+      // spawns iniciales
       for(let i=0;i<3;i++) this._spawnTick();
     },
 
     _spawnTick(){
-      if(!GameCore.state.availableQuestions.length || this.spawnBag.length===0) return;
+      const aq = GameCore.state.availableQuestions;
+      if(!aq || !aq.length || this.targetIdx == null) return;
 
-      const q = GameCore.state.availableQuestions[this.targetIdx];
+      const q = aq[this.targetIdx];
       if(!q) return;
 
-      if(this.spawnBag.length===0){
+      if(this.spawnBag.length === 0){
         this.spawnBag = q.options.map((_,i)=>i);
         shuffle(this.spawnBag);
       }
 
-      const idx = this.spawnBag.shift();
-      const text = q.options[idx] || '---';
+      const optIdx = this.spawnBag.shift(); // índice en q.options
+      const text = q.options[optIdx] || '---';
 
-      const x = (Math.random()-0.5)*1400;
-      const y = (Math.random()-0.5)*500;
+      const x = (Math.random()-0.5) * 1400;
+      const y = (Math.random()-0.5) * 500;
       const z = this.TUNNEL.SPAWN_Z;
       const velZ = this.TUNNEL.BASE_VEL + Math.random()*420;
 
-      this._createBubble(idx, text, new THREE.Vector3(x,y,z), new THREE.Vector3(0,0,velZ));
+      this._createBubble(optIdx, text, new THREE.Vector3(x,y,z), new THREE.Vector3(0,0,velZ));
     },
 
     _makeTextSprite(text, baseFont = 120, scaleY = 0.65){
@@ -115,17 +132,21 @@
       const group = this.burbujas.find(bb=>bb.userData.sphere===mesh);
       if(!group) return;
 
-      const q = GameCore.state.availableQuestions[this.targetIdx];
+      const aq = GameCore.state.availableQuestions;
+      const q = aq[this.targetIdx];
+      if(!q) return;
+
+      // idxParam es índice sobre q.options
       const selectedTranslation = q.options[group.userData.idxParam];
       const correct = selectedTranslation === q.translation;
 
       if(correct){
-        StorageAPI.clearIfCorrect(q.pattern);
         GameCore._onCorrectCollection(q.pattern);
+        // limpiar y comenzar nueva ronda
         this._clearAllBubbles();
+        this._end();
         this.beginRound();
       } else {
-        StorageAPI.markWrong(q.pattern);
         GameCore._onWrongCollection(q.pattern);
         UI.showFeedback('Incorrecto ❌');
       }
@@ -133,16 +154,18 @@
 
     _clearAllBubbles(){ for(const b of this.burbujas) this.scene.remove(b); this.burbujas.length=0; },
 
-    _end(){ if(this.spawnTimer){ clearInterval(this.spawnTimer); this.spawnTimer=null; } },
+    _end(){ if(this.spawnTimer){ clearInterval(this.spawnTimer); this.spawnTimer = null; } },
 
     update(dt){
       for(let i=this.burbujas.length-1;i>=0;i--){
-        const b=this.burbujas[i];
+        const b = this.burbujas[i];
         b.position.addScaledVector(b.userData.velocity, dt);
         if(b.position.z > this.TUNNEL.DESPAWN_Z){
-          this.scene.remove(b); this.burbujas.splice(i,1);
+          this.scene.remove(b);
+          this.burbujas.splice(i,1);
+        } else {
+          if(b.userData.sprite) b.userData.sprite.quaternion.copy(this.camera.quaternion);
         }
-        if(b.userData.sprite) b.userData.sprite.quaternion.copy(this.camera.quaternion);
       }
     }
   };
