@@ -11,55 +11,55 @@
       this.scene = three.scene; this.camera = three.camera;
       this.renderer = three.renderer; this.raycaster = three.raycaster;
 
-      // cámara fija hacia -Z
       this.camera.position.set(0,0,0); this.camera.lookAt(0,0,-1);
-
       this.burbujas.length = 0;
       UI.setQuestion('--');
+
       this.spawnBag = [];
       this.targetBag = [];
-      // el core invoca beginRound() para crear target y spawns iniciales
+      this.targetIdx = null;
+      this.currentPattern = null;
     },
 
     destroy(){
-      if(this.spawnTimer){ clearInterval(this.spawnTimer); this.spawnTimer=null; }
+      this._end();
       for(const b of this.burbujas) this.scene.remove(b);
       this.burbujas.length = 0;
     },
 
     beginRound(){
       const total = GameCore.state.availableQuestions.length;
-      UI.setProgress(GameCore.state.answeredSet.size, total);
+      const remainingIdx = GameCore.state.availableQuestions.map((_,i)=>i)
+                             .filter(i=>!GameCore.state.answeredSet.has(i));
 
-      const remainingIdx = GameCore.state.availableQuestions.map((_,i)=>i).filter(i=>!GameCore.state.answeredSet.has(i));
       if(!remainingIdx.length){
         UI.showFinal(GameCore.state.answeredSet.size, total, ()=>GameCore.restart());
         return;
       }
 
-      // elegir target
+      // Elegir target
       this.targetIdx = remainingIdx[Math.floor(Math.random()*remainingIdx.length)];
       const q = GameCore.state.availableQuestions[this.targetIdx];
       this.currentPattern = q.pattern;
       UI.setQuestion(q.question);
 
-      // llenar spawnBag con indices de opciones del verbo actual
+      // Llenar spawnBag con indices de opciones del verbo actual
       this.spawnBag = q.options.map((_,i)=>i);
       shuffle(this.spawnBag);
 
-      if(this.spawnTimer){ clearInterval(this.spawnTimer); }
+      if(this.spawnTimer) clearInterval(this.spawnTimer);
       this.spawnTimer = setInterval(()=>this._spawnTick(), this.TUNNEL.SPAWN_INTERVAL_MS);
 
       for(let i=0;i<3;i++) this._spawnTick();
     },
 
     _spawnTick(){
-      if(!GameCore.state.availableQuestions.length) return;
+      if(!GameCore.state.availableQuestions.length || this.spawnBag.length===0) return;
 
       const q = GameCore.state.availableQuestions[this.targetIdx];
       if(!q) return;
 
-      if(this.spawnBag.length === 0){
+      if(this.spawnBag.length===0){
         this.spawnBag = q.options.map((_,i)=>i);
         shuffle(this.spawnBag);
       }
@@ -67,8 +67,8 @@
       const idx = this.spawnBag.shift();
       const text = q.options[idx] || '---';
 
-      const x = (Math.random()-0.5) * 1400;
-      const y = (Math.random()-0.5) * 500;
+      const x = (Math.random()-0.5)*1400;
+      const y = (Math.random()-0.5)*500;
       const z = this.TUNNEL.SPAWN_Z;
       const velZ = this.TUNNEL.BASE_VEL + Math.random()*420;
 
@@ -120,10 +120,12 @@
       const correct = selectedTranslation === q.translation;
 
       if(correct){
+        StorageAPI.clearIfCorrect(q.pattern);
         GameCore._onCorrectCollection(q.pattern);
         this._clearAllBubbles();
         this.beginRound();
       } else {
+        StorageAPI.markWrong(q.pattern);
         GameCore._onWrongCollection(q.pattern);
         UI.showFeedback('Incorrecto ❌');
       }
