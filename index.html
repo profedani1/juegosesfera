@@ -24,11 +24,8 @@
 </head>
 <body>
 <div id="container">
-  <div id="uiTop">
+  <div id="uiTop" id="controls">
     <div class="small" style="display:flex;align-items:center;gap:6px">
-      <label style="display:flex;align-items:center;gap:6px;color:#bfe">
-        <input type="checkbox" id="chkRecov"> Recuperación
-      </label>
       <span style="margin-left:10px;color:#f99">Errores: <strong id="mistakeCount">0</strong></span>
       <span style="margin-left:10px" class="small">Modo:
         <select id="modeSelect" class="btn" style="padding:6px 10px">
@@ -39,6 +36,8 @@
       <button id="btnRestart" class="btn">Reiniciar</button>
       <button id="btnPause" class="btn">Pausa</button>
       <button id="btnToggleLog" class="btn">Ver log</button>
+      <!-- Botón de recuperación dinámico -->
+      <button id="btnRecovMode" class="btn" style="display:none">Modo recuperación</button>
     </div>
   </div>
 
@@ -59,7 +58,7 @@
 <script src="./core/storage.js"></script>
 <script src="./core/ui.js"></script>
 <script src="./core/core.js"></script>
-<!-- Carga de modo dinámico -->
+<!-- Carga dinámica -->
 <script>
   (function bootstrap(){
     const params = new URLSearchParams(location.search);
@@ -76,16 +75,14 @@
       document.body.appendChild(s);
     }
 
-    // UI bindings generales
+    // Botones generales
     document.getElementById('btnRestart').onclick = () => window.GameCore.restart();
     document.getElementById('btnPause').onclick   = () => window.GameCore.togglePause();
     document.getElementById('btnToggleLog').onclick = () => {
       const ta = document.getElementById('mistakeLog');
       ta.style.display = (ta.style.display === 'none' || !ta.style.display) ? 'block' : 'none';
     };
-    document.getElementById('chkRecov').onchange = () => window.GameCore.restart();
     select.onchange = () => {
-      // recargar modo
       window.GameCore.stop();
       loadModeAndStart();
       history.replaceState(null, '', `?mode=${select.value}`);
@@ -96,6 +93,5 @@
 </script>
 </body>
 </html>
-
 
 
