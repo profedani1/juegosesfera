@@ -169,7 +169,6 @@
 })(window);
 
 
-  global.GameModes.orbit = Orbit;
-})(window);
+
 
 
