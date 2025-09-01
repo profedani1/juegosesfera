@@ -1,4 +1,4 @@
-// core.js — GameCore con botón de recuperación condicional (compatibilidad con StorageAPI.toTemplatePattern)
+// core.js — GameCore con modo recuperación avanzado (compatibilidad con StorageAPI.toTemplatePattern)
 (function(global){
   const GameCore = {
     three: { scene:null, camera:null, renderer:null, raycaster:null },
@@ -63,26 +63,34 @@
     const mistakes = StorageAPI.getMistakes() || [];
     const all = QuestionBank.buildPoolFromVerbsPronouns();
     if(GameCore.state.recoveryOn && mistakes.length){
-      // usar la normalización de StorageAPI para comparar patrones plantilla
       const filtered = all.filter(q => mistakes.some(m => m.pattern === StorageAPI.toTemplatePattern(q.pattern)));
-      GameCore.state.pool = filtered.length ? filtered : all;
+      GameCore.state.pool = filtered.length ? filtered : [];
     } else {
       GameCore.state.pool = all;
     }
     refreshRecoveryButton();
   }
 
-  // Mostrar/ocultar botón recovery según errores >= 10
+  // Mostrar/ocultar botón recovery y limpiar errores según condiciones
   function refreshRecoveryButton(){
     const btn = document.getElementById('btnRecovMode');
+    const btnClear = document.getElementById('btnClearMistakes');
     const mistakes = StorageAPI.getMistakes() || [];
-    if(!btn) return;
-    if(mistakes.length >= 10 && !GameCore.state.recoveryOn){
-      btn.style.display = '';
-      btn.disabled = false;
-    } else {
-      btn.style.display = 'none';
+    if(btn){
+      if(mistakes.length >= 10 && !GameCore.state.recoveryOn){
+        btn.style.display = '';
+        btn.disabled = false;
+      } else {
+        btn.style.display = 'none';
+      }
     }
+    if(btnClear) btnClear.style.display = mistakes.length ? '' : 'none';
+
+    // actualizar log si existe
+    const logArea = document.getElementById('mistakeLog');
+    if(logArea) logArea.value = JSON.stringify(mistakes, null, 2);
+    const cntEl = document.getElementById('mistakeCount');
+    if(cntEl) cntEl.textContent = mistakes.length;
   }
 
   // activar/desactivar recuperación
@@ -117,6 +125,16 @@
 
   function nextQuestionProgressive(){
     const aq = GameCore.state.availableQuestions;
+
+    // Si no hay preguntas en modo recuperación, mostrar mensaje
+    if(GameCore.state.recoveryOn && !aq.length){
+      UI.setQuestion('✅ No tienes errores guardados. Cambia a modo normal.');
+      if(GameCore.state.modeImpl?.presentOptionsForCurrent){
+        GameCore.state.modeImpl.presentOptionsForCurrent([], '');
+      }
+      return;
+    }
+
     if(!aq.length){
       if(GameCore.state.recoveryOn){
         UI.showFinal(GameCore.state.answeredCount, 0, ()=>{ disableRecovery(); });
@@ -141,8 +159,15 @@
     const q = aq[nextIdx];
     GameCore.state.currentQuestion = q;
 
+    // Mostrar pregunta y estado
     UI.setQuestion(q.question);
     UI.setProgress(GameCore.state.answeredCount, aq.length);
+
+    // Pregunta en rojo si es un error previo
+    const isMistake = StorageAPI.getMistakes().some(m => m.pattern === StorageAPI.toTemplatePattern(q.pattern));
+    const el = document.getElementById('preguntaMain');
+    if(el) el.style.color = isMistake ? 'red' : 'black';
+
     if(GameCore.state.modeImpl?.presentOptionsForCurrent){
       GameCore.state.modeImpl.presentOptionsForCurrent(q.options, q.translation);
     }
@@ -155,9 +180,7 @@
     const pIdx = GameCore.state.pendingIndex;
 
     if(GameCore.state.recoveryOn){
-      // RECUPERACIÓN: si acierta -> quitar error y marcar usado; si falla -> marcar error y avanzar
       if(correct){
-        // usar la normalización de StorageAPI (q.pattern es plantilla sin escapar)
         StorageAPI.clearIfCorrect(q);
         if(typeof pIdx === 'number') GameCore.state.usedIndexSet.add(pIdx);
         GameCore.state.answeredCount++;
@@ -165,7 +188,7 @@
         UI.flashStatus(true);
       } else {
         StorageAPI.markWrong(q);
-        if(typeof pIdx === 'number') GameCore.state.usedIndexSet.add(pIdx); // no se repite en recovery
+        if(typeof pIdx === 'number') GameCore.state.usedIndexSet.add(pIdx);
         UI.showFeedback('Incorrecto ❌');
         UI.flashStatus(false);
       }
@@ -175,9 +198,7 @@
       return;
     }
 
-    // MODO NORMAL: si acierta -> avanzar; si falla -> marcar error pero repetir pregunta hasta acertar
     if(correct){
-      // **NO** quitar error aquí (persisten para recuperación)
       UI.showFeedback('Correcto ✅');
       GameCore.state.answeredCount++;
       UI.flashStatus(true);
@@ -185,10 +206,9 @@
       GameCore.state.pendingIndex = null;
       setTimeout(nextQuestionProgressive, 600);
     } else {
-      StorageAPI.markWrong(q); // marca usando la plantilla normalizada
+      StorageAPI.markWrong(q);
       UI.showFeedback('Incorrecto ❌');
       UI.flashStatus(false);
-      // re-presentar pero no borrar el error
       if(GameCore.state.modeImpl?.presentOptionsForCurrent){
         const opts = q.options.slice(); shuffle(opts);
         GameCore.state.modeImpl.presentOptionsForCurrent(opts, q.translation);
@@ -208,7 +228,6 @@
   }
 
   function onCorrectCollection(targetPattern){
-    // Solo eliminar error en colección si estamos en recuperación
     if(GameCore.state.recoveryOn){
       const q = GameCore.state.availableQuestions.find(q=>q.pattern === targetPattern);
       if(q) StorageAPI.clearIfCorrect(q);
@@ -257,7 +276,7 @@
     if(!GameCore.state.modeImpl) throw new Error(`Modo no encontrado: ${modeName}`);
     GameCore.state.modeImpl?.init?.(GameCore.three);
 
-    // conectar botón de recuperación (crea si no existe)
+    // Botón modo recuperación
     let btn = document.getElementById('btnRecovMode');
     if(!btn){
       const wrap = document.getElementById('controls') || document.getElementById('uiTop') || document.body;
@@ -265,6 +284,36 @@
       btn.style.display='none'; btn.onclick = ()=> enableRecovery();
       wrap.appendChild(btn);
     }
+
+    // Botón limpiar errores
+    let btnClear = document.getElementById('btnClearMistakes');
+    if(!btnClear){
+      const wrap = document.getElementById('controls') || document.getElementById('uiTop') || document.body;
+      btnClear = document.createElement('button');
+      btnClear.id = 'btnClearMistakes';
+      btnClear.textContent = 'Limpiar errores';
+      btnClear.style.display = 'none';
+      btnClear.onclick = () => {
+        if(confirm('¿Borrar todos los errores guardados?')){
+          StorageAPI.saveMistakes([]);
+          refreshRecoveryButton();
+        }
+      };
+      wrap.appendChild(btnClear);
+    }
+
+    // Área de log de errores
+    let logArea = document.getElementById('mistakeLog');
+    if(!logArea){
+      logArea = document.createElement('textarea');
+      logArea.id = 'mistakeLog';
+      logArea.readOnly = true;
+      logArea.style.width = '100%';
+      logArea.style.height = '100px';
+      const wrap = document.getElementById('uiBottom') || document.body;
+      wrap.appendChild(logArea);
+    }
+
     refreshRecoveryButton();
 
     if(GameCore.state.modeImpl.style === 'coleccion') beginSessionCollection();
