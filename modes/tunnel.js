@@ -1,4 +1,3 @@
-// Modo Túnel: burbujas que vienen por Z; objetivo = traducción de la pregunta actual
 (function(global){
   if(!global.GameModes) global.GameModes = {};
   const Tunnel = {
@@ -9,59 +8,64 @@
     TUNNEL: { SPAWN_INTERVAL_MS: 1200, BURBUJA_RADIO: 150, SPAWN_Z: -3400, DESPAWN_Z: 400, BASE_VEL: 380 },
 
     init(three){
-      this.scene=three.scene; this.camera=three.camera; this.renderer=three.renderer; this.raycaster=three.raycaster;
+      this.scene = three.scene; this.camera = three.camera;
+      this.renderer = three.renderer; this.raycaster = three.raycaster;
+
       // cámara fija hacia -Z
       this.camera.position.set(0,0,0); this.camera.lookAt(0,0,-1);
-      // preparar bolsas
-      this.spawnBag=[]; this.targetBag=[];
-      this.burbujas.length=0;
+
+      this.burbujas.length = 0;
       UI.setQuestion('--');
+      this.spawnBag = [];
+      this.targetBag = [];
       // el core invoca beginRound() para crear target y spawns iniciales
     },
 
     destroy(){
       if(this.spawnTimer){ clearInterval(this.spawnTimer); this.spawnTimer=null; }
       for(const b of this.burbujas) this.scene.remove(b);
-      this.burbujas.length=0;
+      this.burbujas.length = 0;
     },
 
     beginRound(){
       const total = GameCore.state.availableQuestions.length;
-      // refrescar progreso
       UI.setProgress(GameCore.state.answeredSet.size, total);
 
-      // elegir target
       const remainingIdx = GameCore.state.availableQuestions.map((_,i)=>i).filter(i=>!GameCore.state.answeredSet.has(i));
       if(!remainingIdx.length){
         UI.showFinal(GameCore.state.answeredSet.size, total, ()=>GameCore.restart());
         return;
       }
+
+      // elegir target
       this.targetIdx = remainingIdx[Math.floor(Math.random()*remainingIdx.length)];
       const q = GameCore.state.availableQuestions[this.targetIdx];
       this.currentPattern = q.pattern;
       UI.setQuestion(q.question);
 
-      // llenar bolsas de spawn
-      this.spawnBag = remainingIdx.slice();
+      // llenar spawnBag con indices de opciones del verbo actual
+      this.spawnBag = q.options.map((_,i)=>i);
       shuffle(this.spawnBag);
 
-      // iniciar spawns
       if(this.spawnTimer){ clearInterval(this.spawnTimer); }
       this.spawnTimer = setInterval(()=>this._spawnTick(), this.TUNNEL.SPAWN_INTERVAL_MS);
-      // spawns iniciales
+
       for(let i=0;i<3;i++) this._spawnTick();
     },
 
     _spawnTick(){
-      const remainingIdx = GameCore.state.availableQuestions.map((_,i)=>i).filter(i=>!GameCore.state.answeredSet.has(i));
-      if(!remainingIdx.length){ this._end(); return; }
+      if(!GameCore.state.availableQuestions.length) return;
+
+      const q = GameCore.state.availableQuestions[this.targetIdx];
+      if(!q) return;
+
       if(this.spawnBag.length === 0){
-        this.spawnBag = remainingIdx.slice();
+        this.spawnBag = q.options.map((_,i)=>i);
         shuffle(this.spawnBag);
       }
+
       const idx = this.spawnBag.shift();
-      const aq = GameCore.state.availableQuestions;
-      const text = aq[idx] ? aq[idx].translation : '---';
+      const text = q.options[idx] || '---';
 
       const x = (Math.random()-0.5) * 1400;
       const y = (Math.random()-0.5) * 500;
@@ -73,10 +77,10 @@
 
     _makeTextSprite(text, baseFont = 120, scaleY = 0.65){
       const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
       canvas.width = 1024; canvas.height = 512;
+      const ctx = canvas.getContext('2d');
       ctx.clearRect(0,0,canvas.width,canvas.height);
-      ctx.textBaseline = 'middle'; ctx.fillStyle = 'white';
+      ctx.textBaseline='middle'; ctx.fillStyle='white';
       ctx.font = `bold ${baseFont}px monospace`;
       ctx.fillText(text, canvas.width/2 - ctx.measureText(text).width/2, canvas.height/2);
       const tex = new THREE.CanvasTexture(canvas); tex.minFilter = THREE.LinearFilter;
@@ -92,15 +96,18 @@
       const sphere = new THREE.Mesh(geom, mat);
       const sprite = this._makeTextSprite(text);
       const group = new THREE.Object3D();
-      group.add(sphere); sprite.position.set(0,0,0); group.add(sprite);
+      group.add(sphere);
+      sprite.position.set(0,0,0);
+      group.add(sprite);
       group.userData = { idxParam: idx, sphere, sprite, velocity, birth: performance.now() };
       if(position) group.position.copy(position);
-      this.scene.add(group); this.burbujas.push(group);
+      this.scene.add(group);
+      this.burbujas.push(group);
       return group;
     },
 
     pick(nx, ny){
-      if(GameCore.state.availableQuestions.length===0) return;
+      if(!GameCore.state.availableQuestions.length) return;
       this.raycaster.setFromCamera(new THREE.Vector2(nx, ny), this.camera);
       const ints = this.raycaster.intersectObjects(this.burbujas.map(b=>b.userData.sphere));
       if(!ints.length) return;
@@ -108,26 +115,25 @@
       const group = this.burbujas.find(bb=>bb.userData.sphere===mesh);
       if(!group) return;
 
-      const isCorrect = (group.userData.idxParam === this.targetIdx);
-      if(isCorrect){
-        GameCore._onCorrectCollection(this.currentPattern);
-        // destruir todas y comenzar nueva ronda con otro target
+      const q = GameCore.state.availableQuestions[this.targetIdx];
+      const selectedTranslation = q.options[group.userData.idxParam];
+      const correct = selectedTranslation === q.translation;
+
+      if(correct){
+        GameCore._onCorrectCollection(q.pattern);
         this._clearAllBubbles();
         this.beginRound();
       } else {
-        GameCore._onWrongCollection(this.currentPattern);
+        GameCore._onWrongCollection(q.pattern);
         UI.showFeedback('Incorrecto ❌');
       }
     },
 
     _clearAllBubbles(){ for(const b of this.burbujas) this.scene.remove(b); this.burbujas.length=0; },
 
-    _end(){
-      if(this.spawnTimer){ clearInterval(this.spawnTimer); this.spawnTimer=null; }
-    },
+    _end(){ if(this.spawnTimer){ clearInterval(this.spawnTimer); this.spawnTimer=null; } },
 
     update(dt){
-      // mover burbujas hacia la cámara
       for(let i=this.burbujas.length-1;i>=0;i--){
         const b=this.burbujas[i];
         b.position.addScaledVector(b.userData.velocity, dt);
