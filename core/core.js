@@ -1,4 +1,4 @@
-// core.js — GameCore con botón de recuperación condicional
+// core.js — GameCore con botón de recuperación condicional (compatibilidad con StorageAPI.toTemplatePattern)
 (function(global){
   const GameCore = {
     three: { scene:null, camera:null, renderer:null, raycaster:null },
@@ -58,26 +58,27 @@
     }, {passive:true});
   }
 
-  // prepara pool (si recoveryOn => filtra por errores)
+  // prepara pool (si recoveryOn => filtra por errores usando StorageAPI.toTemplatePattern)
   function preparePool(){
-    const mistakes = StorageAPI.getMistakes();
+    const mistakes = StorageAPI.getMistakes() || [];
     const all = QuestionBank.buildPoolFromVerbsPronouns();
     if(GameCore.state.recoveryOn && mistakes.length){
-      const filtered = all.filter(q => mistakes.some(m => m.pattern === q.pattern));
+      // usar la normalización de StorageAPI para comparar patrones plantilla
+      const filtered = all.filter(q => mistakes.some(m => m.pattern === StorageAPI.toTemplatePattern(q.pattern)));
       GameCore.state.pool = filtered.length ? filtered : all;
     } else {
       GameCore.state.pool = all;
     }
-    refreshRecoveryButton(); // actualizar visibilidad del botón
+    refreshRecoveryButton();
   }
 
   // Mostrar/ocultar botón recovery según errores >= 10
   function refreshRecoveryButton(){
     const btn = document.getElementById('btnRecovMode');
-    const mistakes = StorageAPI.getMistakes();
+    const mistakes = StorageAPI.getMistakes() || [];
     if(!btn) return;
     if(mistakes.length >= 10 && !GameCore.state.recoveryOn){
-      btn.style.display = ''; // visible
+      btn.style.display = '';
       btn.disabled = false;
     } else {
       btn.style.display = 'none';
@@ -99,7 +100,6 @@
     const btn = document.getElementById('btnRecovMode');
     if(btn) { btn.textContent = 'Modo recuperación'; btn.style.display='none'; }
     preparePool();
-    // volver a modo normal: reiniciar sesión
     if(GameCore.state.modeImpl?.style === 'coleccion') beginSessionCollection();
     else beginSessionProgressive();
   }
@@ -118,7 +118,6 @@
   function nextQuestionProgressive(){
     const aq = GameCore.state.availableQuestions;
     if(!aq.length){
-      // si acabó la recuperación, desactivar y volver a normal
       if(GameCore.state.recoveryOn){
         UI.showFinal(GameCore.state.answeredCount, 0, ()=>{ disableRecovery(); });
       } else {
@@ -138,7 +137,6 @@
       return;
     }
 
-    // en ambos modos guardamos pendingIndex; comportamiento (avance/repita) se decide en answerProgressive
     GameCore.state.pendingIndex = nextIdx;
     const q = aq[nextIdx];
     GameCore.state.currentQuestion = q;
@@ -159,13 +157,14 @@
     if(GameCore.state.recoveryOn){
       // RECUPERACIÓN: si acierta -> quitar error y marcar usado; si falla -> marcar error y avanzar
       if(correct){
-        StorageAPI.clearIfCorrect(q.pattern);
+        // usar la normalización de StorageAPI (q.pattern es plantilla sin escapar)
+        StorageAPI.clearIfCorrect(q);
         if(typeof pIdx === 'number') GameCore.state.usedIndexSet.add(pIdx);
         GameCore.state.answeredCount++;
         UI.showFeedback('Correcto ✅');
         UI.flashStatus(true);
       } else {
-        StorageAPI.markWrong(q.pattern);
+        StorageAPI.markWrong(q);
         if(typeof pIdx === 'number') GameCore.state.usedIndexSet.add(pIdx); // no se repite en recovery
         UI.showFeedback('Incorrecto ❌');
         UI.flashStatus(false);
@@ -178,7 +177,7 @@
 
     // MODO NORMAL: si acierta -> avanzar; si falla -> marcar error pero repetir pregunta hasta acertar
     if(correct){
-      // **NO** quitar error aquí (persisten para la próxima recuperación)
+      // **NO** quitar error aquí (persisten para recuperación)
       UI.showFeedback('Correcto ✅');
       GameCore.state.answeredCount++;
       UI.flashStatus(true);
@@ -186,7 +185,7 @@
       GameCore.state.pendingIndex = null;
       setTimeout(nextQuestionProgressive, 600);
     } else {
-      StorageAPI.markWrong(q.pattern);
+      StorageAPI.markWrong(q); // marca usando la plantilla normalizada
       UI.showFeedback('Incorrecto ❌');
       UI.flashStatus(false);
       // re-presentar pero no borrar el error
@@ -209,7 +208,11 @@
   }
 
   function onCorrectCollection(targetPattern){
-    StorageAPI.clearIfCorrect(targetPattern); // colección: borrar solo si se acierta en recovery
+    // Solo eliminar error en colección si estamos en recuperación
+    if(GameCore.state.recoveryOn){
+      const q = GameCore.state.availableQuestions.find(q=>q.pattern === targetPattern);
+      if(q) StorageAPI.clearIfCorrect(q);
+    }
     const idx = GameCore.state.availableQuestions.findIndex(q=>q.pattern===targetPattern);
     if(idx>=0) GameCore.state.answeredSet.add(idx);
     UI.flashStatus(true);
@@ -224,7 +227,8 @@
   }
 
   function onWrongCollection(targetPattern){
-    StorageAPI.markWrong(targetPattern);
+    const q = GameCore.state.availableQuestions.find(q=>q.pattern === targetPattern);
+    if(q) StorageAPI.markWrong(q);
     UI.flashStatus(false);
     refreshRecoveryButton();
   }
@@ -256,7 +260,7 @@
     // conectar botón de recuperación (crea si no existe)
     let btn = document.getElementById('btnRecovMode');
     if(!btn){
-      const wrap = document.getElementById('controls') || document.body;
+      const wrap = document.getElementById('controls') || document.getElementById('uiTop') || document.body;
       btn = document.createElement('button'); btn.id='btnRecovMode'; btn.textContent='Modo recuperación';
       btn.style.display='none'; btn.onclick = ()=> enableRecovery();
       wrap.appendChild(btn);
