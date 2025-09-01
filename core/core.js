@@ -5,14 +5,16 @@
     state: {
       paused:false,
       modeName:null,
-      modeImpl:null,  // objeto con init/update/pick/destroy
+      modeImpl:null,
       pool:[],
       style: 'progresivo',
       answeredCount:0,
       answeredSet: new Set(),
       currentQuestion:null,
       availableQuestions:[],
-      usedIndexSet: new Set()
+      usedIndexSet: new Set(),
+      recoveryOn: false,    // indica si estamos en modo recuperación activo
+      pendingIndex: null    // índice temporal mientras esperamos acierto en recuperación
     }
   };
 
@@ -65,42 +67,56 @@
   function preparePool(){
     const mistakes = StorageAPI.getMistakes();
     const all = QuestionBank.buildPoolFromVerbsPronouns();
-    const recoveryOn = document.getElementById('chkRecov')?.checked;
-    if(recoveryOn && mistakes.length){
+    const recoveryChecked = document.getElementById('chkRecov')?.checked;
+    if(recoveryChecked && mistakes.length){
       const filtered = all.filter(q => mistakes.some(m => m.pattern === q.pattern));
       GameCore.state.pool = filtered.length ? filtered : all;
+      GameCore.state.recoveryOn = !!filtered.length;
     } else {
       GameCore.state.pool = all;
+      GameCore.state.recoveryOn = false;
     }
   }
 
-  // --- Estilo Progresivo
+  // --- Sesión progresiva
   function beginSessionProgressive(){
     GameCore.state.style = 'progresivo';
     GameCore.state.availableQuestions = GameCore.state.pool.slice();
     shuffle(GameCore.state.availableQuestions);
     GameCore.state.usedIndexSet.clear();
     GameCore.state.answeredCount = 0;
+    GameCore.state.pendingIndex = null;
     nextQuestionProgressive();
   }
 
   function nextQuestionProgressive(){
     const aq = GameCore.state.availableQuestions;
+    if(!aq.length){
+      UI.showFinal(GameCore.state.answeredCount, 0, ()=>GameCore.restart());
+      return;
+    }
+
     let nextIdx = null;
     for(let i=0;i<aq.length;i++) if(!GameCore.state.usedIndexSet.has(i)){ nextIdx=i; break; }
+
     if(nextIdx === null){
       UI.showFinal(GameCore.state.answeredCount, aq.length, ()=>GameCore.restart());
       return;
     }
 
-    GameCore.state.usedIndexSet.add(nextIdx);
+    if(GameCore.state.recoveryOn){
+      GameCore.state.pendingIndex = nextIdx; // espera hasta que acierte
+    } else {
+      GameCore.state.usedIndexSet.add(nextIdx);
+      GameCore.state.pendingIndex = null;
+    }
+
     const q = aq[nextIdx];
     GameCore.state.currentQuestion = q;
 
     UI.setQuestion(q.question);
     UI.setProgress(GameCore.state.answeredCount, aq.length);
 
-    // --- PRESENTAR OPCIONES SOLO DEL VERBO ACTUAL
     if(GameCore.state.modeImpl?.presentOptionsForCurrent){
       GameCore.state.modeImpl.presentOptionsForCurrent(q.options, q.translation);
     }
@@ -109,6 +125,32 @@
   function answerProgressive(correct){
     const q = GameCore.state.currentQuestion;
     if(!q) return;
+
+    if(GameCore.state.recoveryOn){
+      const pIdx = GameCore.state.pendingIndex;
+      if(correct){
+        StorageAPI.clearIfCorrect(q.pattern);
+        if(typeof pIdx === 'number') GameCore.state.usedIndexSet.add(pIdx);
+        GameCore.state.answeredCount++;
+        UI.showFeedback('Correcto ✅');
+        UI.flashStatus(true);
+        GameCore.state.pendingIndex = null;
+        setTimeout(nextQuestionProgressive, 500);
+      } else {
+        StorageAPI.markWrong(q.pattern);
+        UI.showFeedback('Incorrecto ❌');
+        UI.flashStatus(false);
+        // re-presentar opciones del mismo q
+        if(GameCore.state.modeImpl?.presentOptionsForCurrent){
+          const opts = q.options.slice();
+          for(let i=opts.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [opts[i],opts[j]]=[opts[j],opts[i]]; }
+          GameCore.state.modeImpl.presentOptionsForCurrent(opts, q.translation);
+        }
+      }
+      return;
+    }
+
+    // Modo normal
     if(correct){
       StorageAPI.clearIfCorrect(q.pattern);
       UI.showFeedback('Correcto ✅');
@@ -119,10 +161,11 @@
       UI.showFeedback('Incorrecto ❌');
       UI.flashStatus(false);
     }
+
     setTimeout(nextQuestionProgressive, 600);
   }
 
-  // --- Estilo Colección
+  // --- Sesión estilo Colección
   function beginSessionCollection(){
     GameCore.state.style = 'coleccion';
     GameCore.state.availableQuestions = GameCore.state.pool.slice();
@@ -206,3 +249,4 @@
 
   global.GameCore = GameCore;
 })(window);
+
