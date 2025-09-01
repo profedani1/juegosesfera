@@ -1,4 +1,3 @@
-// Manejo de localStorage para errores
 (function(global){
   const STORAGE_KEY = 'translationMistakesV1';
 
@@ -20,9 +19,10 @@
     if(!pattern) return;
     const mistakes = getMistakes();
     if(!mistakes.some(m=>m.pattern===pattern)){
-      mistakes.push({ pattern });
+      mistakes.push({ pattern, when: Date.now() });
       saveMistakes(mistakes);
     } else {
+      // si ya existía, podemos actualizar timestamp (opcional)
       saveMistakes(mistakes);
     }
   }
@@ -33,5 +33,10 @@
     saveMistakes(cleaned);
   }
 
-  global.StorageAPI = { getMistakes, saveMistakes, markWrong, clearIfCorrect };
+  // helper: devuelve solo los patterns (útil)
+  function getPatterns(){
+    return getMistakes().map(m=>m.pattern);
+  }
+
+  global.StorageAPI = { getMistakes, saveMistakes, markWrong, clearIfCorrect, getPatterns };
 })(window);
