@@ -1,5 +1,4 @@
 // Núcleo del motor: escena, cámara, renderer, input y ciclo principal.
-// Coordina preguntas y delega la lógica específica al modo activo.
 (function(global){
   const GameCore = {
     three: { scene:null, camera:null, renderer:null, raycaster:null },
@@ -7,11 +6,7 @@
       paused:false,
       modeName:null,
       modeImpl:null,  // objeto con init/update/pick/destroy
-      // flujo de preguntas (genérico)
       pool:[],
-      // Dos estilos de progreso:
-      //   - "progresivo": answeredCount avanza por preguntas presentadas secuencialmente (Orbit).
-      //   - "coleccion": answeredSet de índices correctos (Tunnel).
       style: 'progresivo',
       answeredCount:0,
       answeredSet: new Set(),
@@ -30,18 +25,15 @@
     document.getElementById('container').appendChild(renderer.domElement);
     scene.add(new THREE.AmbientLight(0x666666));
     const pt = new THREE.PointLight(0xffffff,1); pt.position.set(200,200,400); scene.add(pt);
-
     const raycaster = new THREE.Raycaster();
-
     GameCore.three = { scene, camera, renderer, raycaster };
 
-    window.addEventListener('resize', ()=>{
+    window.addEventListener('resize', ()=> {
       camera.aspect = innerWidth/innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(innerWidth, innerHeight);
     });
 
-    // Input genérico -> delega al modo activo
     const dom = renderer.domElement;
     function normFromEvent(ev, rect){
       return {
@@ -49,15 +41,17 @@
         y: -((ev.clientY-rect.top)/rect.height)*2 + 1
       };
     }
+
     dom.addEventListener('click', (ev)=>{
-      if(!GameCore.state.modeImpl || !GameCore.state.modeImpl.pick) return;
-      const rect = dom.getBoundingClientRect();
-      const n = normFromEvent(ev, rect);
-      GameCore.state.modeImpl.pick(n.x, n.y);
+      if(GameCore.state.modeImpl?.pick){
+        const rect = dom.getBoundingClientRect();
+        const n = normFromEvent(ev, rect);
+        GameCore.state.modeImpl.pick(n.x, n.y);
+      }
     });
+
     dom.addEventListener('touchstart', (e)=>{
-      if(!GameCore.state.modeImpl || !GameCore.state.modeImpl.pick) return;
-      if(e.touches.length===1){
+      if(GameCore.state.modeImpl?.pick && e.touches.length===1){
         const t=e.touches[0];
         const rect = dom.getBoundingClientRect();
         const nx = ((t.clientX-rect.left)/rect.width)*2 - 1;
@@ -74,13 +68,13 @@
     const recoveryOn = document.getElementById('chkRecov')?.checked;
     if(recoveryOn && mistakes.length){
       const filtered = all.filter(q => mistakes.some(m => m.pattern === q.pattern));
-      GameCore.state.pool = filtered.length ? filtered : all; // fallback
+      GameCore.state.pool = filtered.length ? filtered : all;
     } else {
       GameCore.state.pool = all;
     }
   }
 
-  // --- Estilo Progresivo (como Órbita): una pregunta a la vez con opciones
+  // --- Estilo Progresivo
   function beginSessionProgressive(){
     GameCore.state.style = 'progresivo';
     GameCore.state.availableQuestions = GameCore.state.pool.slice();
@@ -98,13 +92,17 @@
       UI.showFinal(GameCore.state.answeredCount, aq.length, ()=>GameCore.restart());
       return;
     }
+
     GameCore.state.usedIndexSet.add(nextIdx);
     const q = aq[nextIdx];
     GameCore.state.currentQuestion = q;
+
     UI.setQuestion(q.question);
     UI.setProgress(GameCore.state.answeredCount, aq.length);
-    if(GameCore.state.modeImpl && GameCore.state.modeImpl.presentOptionsForCurrent){
-      GameCore.state.modeImpl.presentOptionsForCurrent();
+
+    // --- PRESENTAR OPCIONES SOLO DEL VERBO ACTUAL
+    if(GameCore.state.modeImpl?.presentOptionsForCurrent){
+      GameCore.state.modeImpl.presentOptionsForCurrent(q.options, q.translation);
     }
   }
 
@@ -124,16 +122,14 @@
     setTimeout(nextQuestionProgressive, 600);
   }
 
-  // --- Estilo Colección (como Túnel): muchas burbujas, se va completando
+  // --- Estilo Colección
   function beginSessionCollection(){
     GameCore.state.style = 'coleccion';
     GameCore.state.availableQuestions = GameCore.state.pool.slice();
     GameCore.state.answeredSet.clear();
-    UI.setQuestion('—'); // el modo actualizará al elegir target
+    UI.setQuestion('—');
     UI.setProgress(0, GameCore.state.availableQuestions.length);
-    if(GameCore.state.modeImpl && GameCore.state.modeImpl.beginRound){
-      GameCore.state.modeImpl.beginRound(); // modo decide target y spawns
-    }
+    GameCore.state.modeImpl?.beginRound?.();
   }
 
   function onCorrectCollection(targetPattern){
@@ -162,54 +158,39 @@
     if(GameCore.state.paused){ last = now; return; }
     const dt = (now - last)/1000;
     last = now;
-    if(GameCore.state.modeImpl && GameCore.state.modeImpl.update){
-      GameCore.state.modeImpl.update(dt);
-    }
+    GameCore.state.modeImpl?.update?.(dt);
     if(GameCore.three.renderer && GameCore.three.scene && GameCore.three.camera){
       GameCore.three.renderer.render(GameCore.three.scene, GameCore.three.camera);
     }
   }
 
-  // API pública
+  // --- API pública
   GameCore.start = function(modeName){
     if(!GameCore.three.renderer) initThree();
-    StorageAPI.saveMistakes(StorageAPI.getMistakes()); // refrescar UI
+    StorageAPI.saveMistakes(StorageAPI.getMistakes());
     preparePool();
     GameCore.state.modeName = modeName;
-    GameCore.state.modeImpl  = (global.GameModes && global.GameModes[modeName]) ? global.GameModes[modeName] : null;
+    GameCore.state.modeImpl  = (global.GameModes && global.GameModes[modeName]) || null;
     if(!GameCore.state.modeImpl) throw new Error(`Modo no encontrado: ${modeName}`);
 
-    // limpiar escena anterior
-    if(GameCore.state.modeImpl.init){
-      GameCore.state.modeImpl.init(GameCore.three);
-    }
+    GameCore.state.modeImpl?.init?.(GameCore.three);
 
-    // elegir estilo según modo
     if(GameCore.state.modeImpl.style === 'coleccion') beginSessionCollection();
     else beginSessionProgressive();
 
-    // arrancar animación (una vez)
     if(!GameCore._loopStarted){ GameCore._loopStarted = true; requestAnimationFrame(animate); }
   };
 
   GameCore.restart = function(){
-    // limpiar escena del modo
-    if(GameCore.state.modeImpl && GameCore.state.modeImpl.destroy){
-      GameCore.state.modeImpl.destroy();
-    }
+    GameCore.state.modeImpl?.destroy?.();
     preparePool();
-    if(GameCore.state.modeImpl){
-      GameCore.state.modeImpl.init(GameCore.three);
-      if(GameCore.state.modeImpl.style === 'coleccion') beginSessionCollection();
-      else beginSessionProgressive();
-    }
+    GameCore.state.modeImpl?.init?.(GameCore.three);
+    if(GameCore.state.modeImpl.style === 'coleccion') beginSessionCollection();
+    else beginSessionProgressive();
   };
 
   GameCore.stop = function(){
-    if(GameCore.state.modeImpl && GameCore.state.modeImpl.destroy){
-      GameCore.state.modeImpl.destroy();
-    }
-    // no desengancho el loop; simplemente no hará nada sin modo activo
+    GameCore.state.modeImpl?.destroy?.();
     GameCore.state.modeImpl = null;
   };
 
@@ -219,11 +200,9 @@
     if(btn) btn.textContent = GameCore.state.paused ? 'Continuar' : 'Pausa';
   };
 
-  // Hooks para que los modos notifiquen resultados
   GameCore._answerProgressive = answerProgressive;
   GameCore._onCorrectCollection = onCorrectCollection;
   GameCore._onWrongCollection   = onWrongCollection;
 
-  // Export
   global.GameCore = GameCore;
 })(window);
