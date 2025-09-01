@@ -2,31 +2,117 @@
 <html lang="es">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Lenguaje • Framework de Juegos (modular)</title>
 <style>
-  :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,monospace;color:#e8f8f5}
-  html,body{height:100%;margin:0;background:#071018;overflow:hidden}
-  #container{position:relative;width:100%;height:100%}
-  #uiTop{position:absolute;left:12px;top:12px;z-index:60;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .btn{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);padding:8px 12px;border-radius:10px;cursor:pointer;color:#fff;font-size:14px;user-select:none}
-  .btn:hover{background:rgba(255,255,255,0.1);transform:translateY(-1px)}
-  .small{font-size:13px;color:#9fd}
-  #preguntaArea{position:absolute;right:12px;top:12px;z-index:70;background:rgba(0,0,0,0.45);padding:12px;border-radius:10px;min-width:240px}
-  #mensajeFinal{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#fff;background:rgba(0,0,0,0.85);padding:20px;border-radius:14px;font-size:18px;display:none;z-index:80;text-align:center}
-  #feedbackBanner{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);z-index:75;background:rgba(255,255,255,0.08);padding:8px 12px;border-radius:10px;font-weight:600;display:none}
-  #mistakeLog{width:320px;display:none;height:100px;background:#071018;border:1px solid rgba(255,255,255,0.06);color:#9fe;padding:8px;border-radius:10px}
-  @media (max-width:720px){
-    #preguntaArea{right:12px;top:auto;bottom:12px;min-width:180px}
-    #mistakeLog{width:220px}
+:root {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, monospace;
+  color: #e8f8f5;
+}
+html, body {
+  height: 100%;
+  margin: 0;
+  background: #071018;
+  overflow: hidden;
+}
+#container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+#uiTop {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 60;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.btn {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  color: #fff;
+  font-size: 14px;
+  user-select: none;
+}
+.btn:hover {
+  background: rgba(255,255,255,0.1);
+  transform: translateY(-1px);
+}
+.small {
+  font-size: 13px;
+  color: #9fd;
+}
+#preguntaArea {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  z-index: 70;
+  background: rgba(0,0,0,0.45);
+  padding: 12px;
+  border-radius: 10px;
+  min-width: 240px;
+}
+#mensajeFinal {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  color: #fff;
+  background: rgba(0,0,0,0.85);
+  padding: 20px;
+  border-radius: 14px;
+  font-size: 18px;
+  display: none;
+  z-index: 80;
+  text-align: center;
+}
+#feedbackBanner {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 75;
+  background: rgba(255,255,255,0.08);
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-weight: 600;
+  display: none;
+}
+#mistakeLog {
+  width: 320px;
+  display: none;
+  height: 100px;
+  background: #071018;
+  border: 1px solid rgba(255,255,255,0.06);
+  color: #9fe;
+  padding: 8px;
+  border-radius: 10px;
+}
+@media (max-width: 720px) {
+  #preguntaArea {
+    right: 12px;
+    top: auto;
+    bottom: 12px;
+    min-width: 180px;
   }
+  #mistakeLog {
+    width: 220px;
+  }
+}
 </style>
 </head>
 <body>
 <div id="container">
-  <div id="uiTop" id="controls">
-    <div class="small" style="display:flex;align-items:center;gap:6px">
-      <span style="margin-left:10px;color:#f99">Errores: <strong id="mistakeCount">0</strong></span>
+  <!-- Fixed duplicate id: use only uiTop; core.js will create the recovery/clear buttons if needed -->
+  <div id="uiTop">
+    <div class="small" style="display:flex; align-items:center; gap:6px">
+      <span style="margin-left:10px; color:#f99">Errores: <strong id="mistakeCount">0</strong></span>
       <span style="margin-left:10px" class="small">Modo:
         <select id="modeSelect" class="btn" style="padding:6px 10px">
           <option value="tunnel">Túnel</option>
@@ -36,96 +122,79 @@
       <button id="btnRestart" class="btn">Reiniciar</button>
       <button id="btnPause" class="btn">Pausa</button>
       <button id="btnToggleLog" class="btn">Ver log</button>
-      <button id="btnRecovMode" class="btn" style="display:none">Modo recuperación</button>
-      <button id="btnClearMistakes" class="btn" style="display:none">Limpiar errores</button>
+      <!-- NOTE: intentionally removed hardcoded btnRecovMode and btnClearMistakes so core.js
+           can create and wire them (this avoids the bug where an existing button prevents
+           core.js from attaching its event handlers) -->
     </div>
   </div>
-
   <div id="preguntaArea">
     <div id="preguntaMain" style="font-weight:700"></div>
     <div id="preguntaEstado" class="small"></div>
     <textarea id="mistakeLog" readonly></textarea>
   </div>
-
   <div id="mensajeFinal"></div>
   <div id="feedbackBanner"></div>
 </div>
-
 <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
-
 <!-- Núcleo -->
 <script src="./core/questions.js"></script>
 <script src="./core/storage.js"></script>
 <script src="./core/ui.js"></script>
 <script src="./core/core.js"></script>
-
 <!-- Carga dinámica -->
 <script>
-  (function bootstrap() {
-    const params = new URLSearchParams(location.search);
-    const modeParam = params.get('mode');
-    const select = document.getElementById('modeSelect');
-    if (modeParam) select.value = modeParam;
+(function bootstrap() {
+  const params = new URLSearchParams(location.search);
+  const modeParam = params.get('mode');
+  const select = document.getElementById('modeSelect');
 
-    const btnRecov = document.getElementById('btnRecovMode');
-    const btnClear = document.getElementById('btnClearMistakes');
+  if (modeParam) select.value = modeParam;
 
-    function loadModeAndStart() {
-      const modeName = select.value;
-      const s = document.createElement('script');
-      s.src = `modes/${modeName}.js`;
-      s.onload = () => window.GameCore.start(modeName);
-      s.onerror = () => alert(`No se pudo cargar el modo: ${modeName}`);
-      document.body.appendChild(s);
-    }
-
-    // Mostrar botones si hay errores
-    const hasMistakes = StorageAPI.hasMistakes && StorageAPI.hasMistakes();
-    if (hasMistakes) {
-      btnRecov.style.display = 'inline-block';
-      btnClear.style.display = 'inline-block';
-    }
-
-    // Botones generales
-    document.getElementById('btnRestart').onclick = () => window.GameCore.restart();
-    document.getElementById('btnPause').onclick = () => window.GameCore.togglePause();
-    document.getElementById('btnToggleLog').onclick = () => {
-      const ta = document.getElementById('mistakeLog');
-      ta.style.display = (ta.style.display === 'none' || !ta.style.display) ? 'block' : 'none';
-    };
-    btnClear.onclick = () => {
-      if (confirm('¿Borrar todos los errores guardados?')) {
-        StorageAPI.saveMistakes([]);
-        const ta = document.getElementById('mistakeLog');
-        ta.value = '';
-        document.getElementById('mistakeCount').textContent = '0';
-        btnRecov.style.display = 'none';
-        btnClear.style.display = 'none';
+  function loadModeAndStart() {
+    const modeName = select.value;
+    const script = document.createElement('script');
+    script.src = `modes/${modeName}.js`;
+    script.onload = () => {
+      if (window.GameCore && typeof window.GameCore.start === 'function') {
+        window.GameCore.start(modeName);
+      } else {
+        alert('Error: GameCore no está definido correctamente.');
       }
     };
+    script.onerror = () => alert(`No se pudo cargar el modo: ${modeName}`);
+    document.body.appendChild(script);
+  }
 
-    // Botón modo recuperación
-    btnRecov.onclick = () => {
-      const s = document.createElement('script');
-      s.src = 'modes/recovery.js';
-      s.onload = () => {
-        window.GameCore.start('recovery', StorageAPI.getMistakes());
-      };
-      document.body.appendChild(s);
-    };
-
-    // Cambio de modo normal
-    select.onchange = () => {
+  // Botones generales
+  document.getElementById('btnRestart').onclick = () => {
+    if (window.GameCore && typeof window.GameCore.restart === 'function') {
+      window.GameCore.restart();
+    }
+  };
+  document.getElementById('btnPause').onclick = () => {
+    if (window.GameCore && typeof window.GameCore.togglePause === 'function') {
+      window.GameCore.togglePause();
+    }
+  };
+  document.getElementById('btnToggleLog').onclick = () => {
+    const ta = document.getElementById('mistakeLog');
+    if (ta.style.display === 'none' || !ta.style.display) {
+      ta.style.display = 'block';
+    } else {
+      ta.style.display = 'none';
+    }
+  };
+  select.onchange = () => {
+    if (window.GameCore && typeof window.GameCore.stop === 'function') {
       window.GameCore.stop();
-      loadModeAndStart();
-      history.replaceState(null, '', `?mode=${select.value}`);
-    };
-
+    }
     loadModeAndStart();
-  })();
-</script>
+    history.replaceState(null, '', `?mode=${select.value}`);
+  };
 
+  // Cargar y comenzar
+  loadModeAndStart();
+})();
+</script>
 </body>
 </html>
-
-
