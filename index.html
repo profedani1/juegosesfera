@@ -109,8 +109,7 @@ html, body {
 </head>
 <body>
 <div id="container">
-  <!-- Fixed duplicate id: use only uiTop; core.js will create the recovery/clear buttons if needed -->
-  <div id="uiTop">
+  <div id="uiTop" id="controls">
     <div class="small" style="display:flex; align-items:center; gap:6px">
       <span style="margin-left:10px; color:#f99">Errores: <strong id="mistakeCount">0</strong></span>
       <span style="margin-left:10px" class="small">Modo:
@@ -122,9 +121,8 @@ html, body {
       <button id="btnRestart" class="btn">Reiniciar</button>
       <button id="btnPause" class="btn">Pausa</button>
       <button id="btnToggleLog" class="btn">Ver log</button>
-      <!-- NOTE: intentionally removed hardcoded btnRecovMode and btnClearMistakes so core.js
-           can create and wire them (this avoids the bug where an existing button prevents
-           core.js from attaching its event handlers) -->
+      <button id="btnRecovMode" class="btn" style="display:none">Modo recuperación</button>
+      <button id="btnClearMistakes" class="btn" style="display:none">Limpiar errores</button>
     </div>
   </div>
   <div id="preguntaArea">
@@ -148,7 +146,9 @@ html, body {
   const modeParam = params.get('mode');
   const select = document.getElementById('modeSelect');
 
-  if (modeParam) select.value = modeParam;
+  if (modeParam) {
+    select.value = modeParam;
+  }
 
   function loadModeAndStart() {
     const modeName = select.value;
@@ -182,6 +182,16 @@ html, body {
       ta.style.display = 'block';
     } else {
       ta.style.display = 'none';
+    }
+  };
+  document.getElementById('btnClearMistakes').onclick = () => {
+    if (confirm('¿Borrar todos los errores guardados?')) {
+      if (typeof StorageAPI !== 'undefined' && typeof StorageAPI.saveMistakes === 'function') {
+        StorageAPI.saveMistakes([]);
+      }
+      const ta = document.getElementById('mistakeLog');
+      ta.value = '';
+      document.getElementById('mistakeCount').textContent = '0';
     }
   };
   select.onchange = () => {
