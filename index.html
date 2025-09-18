@@ -5,81 +5,262 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Lenguaje • Framework de Juegos</title>
 <style>
-  :root{
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,monospace;
-    color:#e8f8f5
-  }
-  html,body{height:100%;margin:0;background:#071018;overflow:hidden}
-  #container{position:relative;width:100%;height:100%}
-  #uiTop{position:absolute;left:12px;top:12px;z-index:60;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .btn{
-    background:rgba(255,255,255,0.06);
-    border:1px solid rgba(255,255,255,0.08);
-    padding:8px 12px;
-    border-radius:10px;
-    cursor:pointer;
-    color:#fff;
-    font-size:14px;
-    user-select:none
-  }
-  .btn:hover{background:rgba(255,255,255,0.1);transform:translateY(-1px)}
-  .small{font-size:13px;color:#9fd}
+ :root{
+  /* Colores */
+  --bg: #071018;
+  --panel: rgba(0,0,0,0.45);
+  --muted: rgba(255,255,255,0.08);
+  --accent: #9fd;
+  --danger: #f99;
+
+  /* Radio y sombras */
+  --radius: 1.6vh; /* escala con viewport */
+  --card-gap: 1.2vh;
+
+  /* Escala base de UI (se ajusta a la pantalla) */
+  /* 1vh en móviles pequeños será la referencia; clamp evita tamaños extremos */
+  --ui-scale: clamp(0.9, 1.7vh, 1.3);
+
+  /* Tipografía: tamaño adaptable y legible en móvil */
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: clamp(14px, 2.2vw, 18px);
+  color: #e8f8f5;
+}
+
+/* Página y contenedor principal */
+html,body{
+  height:100%;
+  margin:0;
+  background:var(--bg);
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  /* Evitar scroll inesperado en mobile; si necesitas scroll, cámbialo */
+  overflow:hidden;
+  -webkit-user-select:none;
+  user-select:none;
+  touch-action:manipulation; /* mejora respuesta táctil en muchos navegadores */
+}
+
+/* Soporte para notch / safe-area en iOS */
+#container{
+  position:relative;
+  width:100%;
+  height:100%;
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
+  box-sizing:border-box;
+}
+
+/* Top UI: flexible, colapsa en móvil */
+#uiTop{
+  position:absolute;
+  left:calc(3vw);
+  top:calc(2vh);
+  z-index:60;
+  display:flex;
+  gap:calc(var(--card-gap));
+  align-items:center;
+  flex-wrap:wrap;
+  max-width:92vw;
+  pointer-events:auto;
+}
+
+/* Botones táctiles: áreas grandes y consistentes */
+.btn{
+  background: rgba(255,255,255,0.06);
+  border: 0.15vh solid rgba(255,255,255,0.08);
+  padding: calc(0.8vh * var(--ui-scale)) calc(1.8vw * var(--ui-scale));
+  border-radius: calc(var(--radius));
+  cursor:pointer;
+  color:#fff;
+  font-size: clamp(13px, 1.8vh, 16px);
+  line-height:1;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height: clamp(44px, 6vh, 56px); /* hit target mínimo ~44px */
+  min-width: clamp(44px, 10vw, 110px);
+  user-select:none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: transform 120ms ease, background 120ms ease;
+  box-shadow: 0 0.2vh 0.6vh rgba(0,0,0,0.35);
+}
+
+/* Evitar comportamiento hover en pantallas táctiles */
+@media (hover: none), (pointer: coarse) {
+  .btn { transition: none; }
+  .btn:hover { transform: none; background: rgba(255,255,255,0.08); }
+}
+
+/* Pequeña animación táctil (active) que funciona bien en móvil */
+.btn:active{
+  transform: translateY(1px) scale(0.995);
+  background: rgba(255,255,255,0.12);
+}
+
+/* Texto pequeño / indicadores */
+.small { font-size: clamp(12px, 1.6vh, 14px); color:var(--accent); }
+
+/* Pregunta / panel derecho (se posiciona en bottom en móvil) */
+#preguntaArea{
+  position:absolute;
+  right:calc(3vw);
+  top:calc(2vh);
+  z-index:70;
+  background: var(--panel);
+  padding: calc(2vh * var(--ui-scale));
+  border-radius: calc(var(--radius));
+  min-width: min(38vw, 360px);
+  max-width: 86vw;
+  box-sizing:border-box;
+  box-shadow: 0 0.6vh 1.6vh rgba(0,0,0,0.6);
+  pointer-events:auto;
+}
+
+/* Ajustes interiores */
+#preguntaMain { font-weight:700; font-size: clamp(16px, 2.2vh, 20px); color:#fff; }
+#preguntaEstado { margin-top:0.6vh; color:var(--accent); }
+
+/* Advanced menu: drawer en móvil, panel en desktop */
+#advancedMenu{
+  position:absolute;
+  left:calc(3vw);
+  top:calc(8vh);
+  z-index:65;
+  background:var(--panel);
+  padding:calc(1.4vh * var(--ui-scale));
+  border-radius: calc(var(--radius));
+  width: min(280px, 86vw);
+  max-height:60vh;
+  overflow:auto;
+  display:none; /* visible via JS */
+  box-sizing:border-box;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Mensaje final centrado */
+#mensajeFinal{
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  color:#fff;
+  background:rgba(0,0,0,0.9);
+  padding:calc(2.2vh * var(--ui-scale)) calc(3.2vw * var(--ui-scale));
+  border-radius: calc(var(--radius) * 1.2);
+  font-size: clamp(16px, 2.4vh, 22px);
+  display:none;
+  z-index:80;
+  text-align:center;
+  max-width:92vw;
+}
+
+/* Feedback banner estilo discreto pero legible */
+#feedbackBanner{
+  position:absolute;
+  left:50%;
+  bottom:calc(3vh);
+  transform:translateX(-50%);
+  z-index:75;
+  background: rgba(255,255,255,0.08);
+  padding: calc(0.8vh * var(--ui-scale)) calc(1.6vw * var(--ui-scale));
+  border-radius: calc(var(--radius));
+  font-weight:600;
+  display:none;
+}
+
+/* Mistake log: área táctil y legible */
+#mistakeLog{
+  width:320px;
+  display:none;
+  height:100px;
+  background:var(--bg);
+  border:1px solid var(--muted);
+  color:var(--accent);
+  padding:8px;
+  border-radius:10px;
+  resize:none;
+  font-size: clamp(12px, 1.6vh, 14px);
+  box-sizing:border-box;
+}
+
+/* Responsive: mover pregunta al fondo en pantallas pequeñas y ajustar tamaños */
+@media (max-width:720px){
   #preguntaArea{
-    position:absolute;
-    right:12px;top:12px;
-    z-index:70;
-    background:rgba(0,0,0,0.45);
-    padding:12px;
-    border-radius:10px;
-    min-width:240px
+    right:calc(3vw);
+    top:auto;
+    bottom:calc(3vh);
+    min-width: 64vw;
+    padding: calc(1.6vh * var(--ui-scale));
   }
-  #advancedMenu{
-    position:absolute;
-    left:12px;top:70px;
-    z-index:65;
-    background:rgba(0,0,0,0.45);
-    padding:10px;
-    border-radius:10px;
-    max-width:280px;
-    max-height:60%;
-    overflow:auto;
-    display:none; /* <-- oculto al inicio */
+
+  #uiTop{
+    left:calc(3vw);
+    top:calc(1.4vh);
+    gap:calc(1vh);
+    align-items:flex-start;
   }
-  #mensajeFinal{
-    position:absolute;
-    left:50%;top:50%;
-    transform:translate(-50%,-50%);
-    color:#fff;
-    background:rgba(0,0,0,0.85);
-    padding:20px;
-    border-radius:14px;
-    font-size:18px;
-    display:none;
-    z-index:80;
-    text-align:center
+
+  #mistakeLog { width: 78vw; height: 18vh; }
+
+  /* Mostrar advanced menu como full-width drawer cuando se abre (desktop sigue siendo panel) */
+  #advancedMenu.open {
+    display:block;
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: min(92vw, 420px);
+    max-width: 92vw;
+    padding: calc(3vh);
+    border-radius: 0;
+    transform: translateX(0);
+    box-shadow: 6px 0 18px rgba(0,0,0,0.6);
   }
-  #feedbackBanner{
-    position:absolute;
-    left:50%;bottom:24px;
-    transform:translateX(-50%);
-    z-index:75;
-    background:rgba(255,255,255,0.08);
-    padding:8px 12px;
-    border-radius:10px;
-    font-weight:600;
-    display:none
+}
+
+/* Muy pequeño (teléfonos pequeños) */
+@media (max-width:480px){
+  :root { font-size: clamp(13px, 2.2vw, 16px); }
+  .btn {
+    min-width: 44px;
+    padding: calc(0.6vh * var(--ui-scale)) calc(2.6vw * var(--ui-scale));
+    border-radius: calc(var(--radius) * 0.95);
   }
-  #mistakeLog{
-    width:320px;display:none;height:100px;
-    background:#071018;
-    border:1px solid rgba(255,255,255,0.06);
-    color:#9fe;
-    padding:8px;border-radius:10px
-  }
-  @media (max-width:720px){
-    #preguntaArea{right:12px;top:auto;bottom:12px;min-width:180px}
-    #mistakeLog{width:220px}
-  }
+  #preguntaArea { min-width: 72vw; padding: calc(1.4vh * var(--ui-scale)); }
+}
+
+/* Accesibilidad: enfoque visible para teclado */
+:focus { outline: none; }
+:focus-visible { outline: 3px solid rgba(159, 223, 255, 0.18); outline-offset: 3px; }
+
+/* Reduce motion for users who prefer it (evita animaciones innecesarias en móviles) */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+/* Prevent hover-only interactions on touch devices */
+@media (pointer: coarse) {
+  /* eliminar transformaciones por hover que confunden en touch */
+  .btn:hover { transform: none; }
+}
+
+/* Make canvas or three renderer fill container if present (preparado) */
+canvas, #three-canvas, .three-renderer {
+  display:block;
+  width:100%;
+  height:100%;
+  touch-action: none; /* si necesitas gestos de la app, pon touch-action apropiado en JS */
+}
+
+/* Helper utilities */
+.hidden { display:none !important; }
+.kv { display:flex; gap:0.8vh; align-items:center; }
+
+/* Danger / accents helpers */
+.badge { background:var(--muted); padding:6px 8px; border-radius:8px; font-weight:600; color:var(--accent); }
+.badge.danger { color:var(--danger); }
+
 </style>
 </head>
 <body>
@@ -191,3 +372,4 @@
 </script>
 </body>
 </html>
+
