@@ -303,6 +303,7 @@ canvas, #three-canvas, .three-renderer {
 <script src="./core/ui.js"></script>
 <script src="./core/core.js"></script>
 
+
 <script>
 (function bootstrap() {
   const params = new URLSearchParams(location.search);
@@ -331,38 +332,48 @@ canvas, #three-canvas, .three-renderer {
     UI.showRecoveryButtons(true);
   }
 
-  document.getElementById('btnRestart').onclick = () => window.GameCore.restart();
-  document.getElementById('btnPause').onclick = () => window.GameCore.togglePause();
+  // 🔥 función helper para botones táctiles
+  function bindTap(id, handler){
+    const el = document.getElementById(id);
+    if(!el) return;
+    el.addEventListener("pointerup", e => {
+      e.preventDefault(); // evita zoom o doble tap en móvil
+      handler(e);
+    });
+  }
 
-  document.getElementById('btnToggleMenu').onclick = () => {
+  // botones
+  bindTap("btnRestart", () => window.GameCore.restart());
+  bindTap("btnPause", () => window.GameCore.togglePause());
+
+  bindTap("btnToggleMenu", () => {
     const menu = document.getElementById('advancedMenu');
     menu.style.display = (menu.style.display === 'none' || !menu.style.display) 
       ? 'block' 
       : 'none';
-  };
+  });
 
-  document.getElementById('btnToggleLog').onclick = () => {
+  bindTap("btnToggleLog", () => {
     const ta = document.getElementById('mistakeLog');
     ta.style.display = (ta.style.display === 'none' || !ta.style.display) ? 'block' : 'none';
-  };
+  });
 
-  btnClear.onclick = () => {
+  bindTap("btnClearMistakes", () => {
     if(confirm('¿Borrar todos los errores guardados?')){
       StorageAPI.clearMistakes();
       UI.showRecoveryButtons(false);
     }
-  };
+  });
 
-  // 🔥 aquí ya usamos el método integrado en GameCore
-  btnRecov.onclick = () => {
+  bindTap("btnRecovMode", () => {
     window.GameCore.startRecovery();
-  };
+  });
 
-  select.onchange = () => {
+  select.addEventListener("change", () => {
     window.GameCore.stop();
     loadModeAndStart();
     history.replaceState(null, '', `?mode=${select.value}`);
-  };
+  });
 
   // Construir menú avanzado (usa el estado ya cargado en QuestionsAPI)
   if(typeof UI !== 'undefined') UI.buildAdvancedMenu(document.getElementById('advancedMenu'));
@@ -370,6 +381,7 @@ canvas, #three-canvas, .three-renderer {
   loadModeAndStart();
 })();
 </script>
+
+
 </body>
 </html>
-
